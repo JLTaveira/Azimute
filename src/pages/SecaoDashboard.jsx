@@ -1,10 +1,4 @@
-/* Secção Dashboard mostra:
- Lista de elementos
- Bandos / Tribos
- Quem é Guia
- Quem é Dirigente
- Só leitura
- Gerir secção
+/* Secção Dashboard
 src/pages/SecaoDashboard.jsx
  2026-02-17 - Joao Taveira (jltaveira@gmail.com) */
 
@@ -120,8 +114,12 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
   }, [agrupamentoId, secaoDocId, souDirigente, souChefeUnidade, souGuia, souSubGuia, profile?.patrulhaId]);
 
   const membrosByUid = useMemo(() => { const map = new Map(); for (const m of membros) map.set(m.uid, m); return map; }, [membros]);
+  
   const subunidadesOrdenadas = useMemo(() => { const s = [...subunidades]; s.sort((a, b) => String(a.nome || a.id).localeCompare(String(b.nome || b.id))); return s; }, [subunidades]);
+  
+  // AQUI: Usamos esta variável para esconder as inativas da caixa da esquerda!
   const subunidadesAtivasOrdenadas = useMemo(() => subunidadesOrdenadas.filter((x) => x.ativo === true), [subunidadesOrdenadas]);
+  
   const dirigentes = useMemo(() => membros.filter((m) => isDirigente(m)), [membros]);
   const elementos = useMemo(() => membros.filter((m) => isElemento(m)), [membros]);
 
@@ -172,8 +170,6 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
             <h1 className="az-h1" style={{ fontSize: 26, marginBottom: 6 }}>Boa caça, {profile?.totem || profile?.nome || "Escuteiro"}! 🏕️</h1>
             <p className="az-muted" style={{ margin: 0, fontSize: 15 }}>Dashboard da <b>{secao?.nome || secaoDocId}</b> • Agrupamento {agrupamentoId}</p>
             <div className="az-row" style={{ marginTop: 14, gap: 10 }}>
-              
-              {/* O ÍCONE E CARGO DO DIRIGENTE AGORA APARECEM CORRETAMENTE */}
               {souDirigente ? (
                 <span className="az-pill" style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   {funcaoSrc && <img src={funcaoSrc} alt="Cargo" style={{ height: 20 }} />}
@@ -219,12 +215,14 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
                 </div>
               </div>
             )}
+            
+            {/* ESTRUTURA DE BANDOS - APENAS ATIVOS AQUI */}
             <div className="az-card">
               <div className="az-card-inner">
                 <h3 style={{ margin: "0 0 12px", borderBottom: "1px solid var(--stroke)", paddingBottom: 8 }}>⛺ Estrutura de {nomeSubunidades}</h3>
-                {subunidadesOrdenadas.length === 0 ? <div className="az-muted az-small">Sem {nomeSubunidades.toLowerCase()}.</div> : (
+                {subunidadesAtivasOrdenadas.length === 0 ? <div className="az-muted az-small">Sem {nomeSubunidades.toLowerCase()} ativas.</div> : (
                   <div className="az-grid" style={{ gap: 8 }}>
-                    {subunidadesOrdenadas.map(s => {
+                    {subunidadesAtivasOrdenadas.map(s => {
                       const guia = s.guiaUid ? membrosByUid.get(s.guiaUid) : null;
                       const subGuia = s.subGuiaUid ? membrosByUid.get(s.subGuiaUid) : null;
                       return (
@@ -242,6 +240,7 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
             </div>
           </div>
 
+          {/* LISTA DE ELEMENTOS */}
           <div className="az-card">
             <div className="az-card-inner">
               <h3 style={{ margin: "0 0 12px", borderBottom: "1px solid var(--stroke)", paddingBottom: 8 }}>👦 {nomeElementoLista}</h3>
@@ -250,7 +249,17 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
                   const sub = subunidades.find((x) => x.id === grupoId);
                   return (
                     <div key={grupoId}>
-                      <div style={{ fontWeight: 800, color: "var(--brand-teal)", marginBottom: 8 }}>{sub?.nome || (grupoId === "sem_grupo" ? "Elementos sem unidade" : grupoId)}</div>
+                      <div style={{ fontWeight: 800, color: "var(--brand-teal)", marginBottom: 8, display: "flex", alignItems: "center" }}>
+                        {sub?.nome || (grupoId === "sem_grupo" ? "Elementos sem unidade" : grupoId)}
+                        
+                        {/* AVISO SE O ELEMENTO ESTIVER NUMA UNIDADE INATIVA */}
+                        {sub && !sub.ativo && (
+                          <span className="az-pill" style={{ marginLeft: 8, fontSize: 10, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.2)" }}>
+                            Inativa
+                          </span>
+                        )}
+                      </div>
+                      
                       <div className="az-grid" style={{ gap: 8 }}>
                         {list.map(e => (
                           <div key={e.uid} className="az-panel az-panel-sm" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
@@ -266,7 +275,6 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
                             {souChefeUnidade ? (
                               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                                 
-                                {/* ADICIONADO O INPUT PARA O TOTEM */}
                                 <input 
                                   className="az-input" 
                                   style={{ padding: "6px 10px", width: "130px", fontSize: 13 }} 
