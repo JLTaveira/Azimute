@@ -1,0 +1,166 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==========================================
+    // HELPERS BÁSICOS
+    // ==========================================
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Obtém os dados do utilizador logado
+    function me() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Verifica se o perfil existe para evitar erros
+    function meExists() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    // ==========================================
+    // HELPERS DE FUNÇÃO / ROLE
+    // ==========================================
+    function hasFuncao(f) {
+      return meExists() && (f in me().funcoes);
+    }
+
+    function isChefeAgrupamento() { return hasFuncao("CHEFE_AGRUPAMENTO"); }
+    function isSecretarioAgrupamento() { return hasFuncao("SECRETARIO_AGRUPAMENTO"); }
+    function isChefeUnidade() { return hasFuncao("CHEFE_UNIDADE"); }
+    
+    function isDirigente() {
+      return meExists() && me().tipo == "DIRIGENTE";
+    }
+
+    function isGuiaOuSubGuia() {
+      return meExists() && me().tipo == "ELEMENTO" && (me().isGuia == true || me().isSubGuia == true);
+    }
+
+    // ==========================================
+    // HELPERS DE RELACIONAMENTO
+    // ==========================================
+    function sameAgrupamento(targetData) {
+      return meExists() && targetData.agrupamentoId == me().agrupamentoId;
+    }
+
+    function sameSecao(targetData) {
+      return sameAgrupamento(targetData) && targetData.secaoDocId == me().secaoDocId;
+    }
+
+    function sameSubunidade(targetData) {
+      return sameSecao(targetData) 
+        && targetData.patrulhaId != null 
+        && targetData.patrulhaId == me().patrulhaId;
+    }
+
+    // ==========================================
+    // COLEÇÃO: USERS (E AS SUAS SUB-COLEÇÕES)
+    // ==========================================
+    match /users/{uid} {
+      
+      allow read: if signedIn() && (
+        request.auth.uid == uid
+        || (isChefeAgrupamento() && sameAgrupamento(resource.data))
+        || (isSecretarioAgrupamento() && sameAgrupamento(resource.data))
+        || (isDirigente() && sameSecao(resource.data))
+        || (isGuiaOuSubGuia() && sameSubunidade(resource.data))
+      );
+
+      // Regras de Edição de Perfil (Centralizadas num único bloco)
+      allow update: if signedIn() && (
+        
+        // 1. O Próprio (Apenas timestamps)
+        (request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt']))
+        
+        || 
+        // 2. Chefe de Unidade (Pode editar colocação, guia e totem)
+        (isChefeUnidade() && sameSecao(resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['patrulhaId', 'etapaProgresso', 'isGuia', 'isSubGuia', 'totem', 'updatedAt']))
+        
+        || 
+        // 3. Chefe de Agrupamento (Pode editar tudo o que é administrativo)
+        (isChefeAgrupamento() && sameAgrupamento(resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['secaoDocId', 'tipo', 'funcoes', 'totem', 'updatedAt']))
+      );
+
+
+      // ==========================================
+      // SUB-COLEÇÃO: OBJETIVOS (Têm de estar DENTRO da coleção Users!)
+      // ==========================================
+      match /objetivos/{oid} {
+        
+        allow read: if signedIn() && (
+          request.auth.uid == uid 
+          || (isChefeAgrupamento() && sameAgrupamento(get(/databases/$(database)/documents/users/$(uid)).data))
+          || (isDirigente() && sameSecao(get(/databases/$(database)/documents/users/$(uid)).data))
+          || (isGuiaOuSubGuia() && sameSubunidade(get(/databases/$(database)/documents/users/$(uid)).data))
+        );
+
+        // Criação
+        allow create: if signedIn() && (
+          (request.auth.uid == uid && request.resource.data.estado == "ESCOLHA")
+          || (isChefeUnidade() && sameSecao(get(/databases/$(database)/documents/users/$(uid)).data)) // Permite Atribuição Direta pelo CU
+        );
+        
+        // Eliminação
+        allow delete: if signedIn() && (
+          (request.auth.uid == uid && resource.data.estado == "ESCOLHA" && resource.data.bloqueado != true)
+          || (isChefeUnidade() && sameSecao(get(/databases/$(database)/documents/users/$(uid)).data))
+        );
+
+        // Atualização de Estados
+        allow update: if signedIn() && (
+          // GUIA/SUB-GUIA
+          (isGuiaOuSubGuia() && sameSubunidade(get(/databases/$(database)/documents/users/$(uid)).data) && request.resource.data.estado in ["VALIDADO", "REALIZADO"])
+          || 
+          // CHEFE DE UNIDADE
+          (isChefeUnidade() && sameSecao(get(/databases/$(database)/documents/users/$(uid)).data))
+        );
+      }
+
+      // ==========================================
+      // SUB-COLEÇÃO: META
+      // ==========================================
+      match /meta/{docId} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
+      
+    } // <-- AQUI ACABA O MATCH /users/{uid}
+
+
+    // ==========================================
+    // COLEÇÃO: NOTIFICAÇÕES
+    // ==========================================
+    match /notificacoes/{nid} {
+      allow read: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento()) && resource.data.agrupamentoId == me().agrupamentoId;
+      
+      allow update: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento())
+        && sameAgrupamento(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['resolvida', 'resolvidaAt', 'resolvidaPorUid']);
+
+      allow create: if signedIn() && (isDirigente() || isChefeUnidade());
+    }
+
+    // ==========================================
+    // ESTRUTURA E CATÁLOGO
+    // ==========================================
+    match /agrupamento/{agrupamentoId} {
+      allow read: if signedIn() && me().agrupamentoId == agrupamentoId;
+      
+      match /secoes/{secaoId} {
+        allow read: if signedIn() && me().agrupamentoId == agrupamentoId;
+        allow write: if signedIn() && isChefeUnidade() && me().secaoDocId == secaoId;
+
+        match /subunidades/{sid} {
+          allow read: if signedIn() && me().agrupamentoId == agrupamentoId;
+          allow write: if signedIn() && isChefeUnidade() && me().secaoDocId == secaoId;
+        }
+      }
+    }
+
+    match /catalogoObjetivos/{document=**} {
+      allow read: if signedIn();
+    }
+  }
+}

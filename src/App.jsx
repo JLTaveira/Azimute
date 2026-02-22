@@ -1,0 +1,186 @@
+/* App.jsx
+ src/App.jsx
+ 2026-02-16 - Joao Taveira (jltaveira@gmail.com) */
+
+import { useEffect, useMemo, useState } from "react";
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "./firebase";
+
+import azimuteLogo from "./assets/azimute.png"; 
+
+import SecaoDashboard from "./pages/SecaoDashboard";
+import SubunidadesAdmin from "./pages/SubunidadesAdmin";
+import ChefeAgrupamentoDashboard from "./pages/ChefeAgrupamentoDashboard";
+import ElementoObjetivos from "./pages/ElementoObjetivos";
+import GuiaObjetivosGrupo from "./pages/GuiaObjetivosGrupo";
+import ChefeUnidadeObjetivos from "./pages/ChefeUnidadeObjetivos";
+import SecretarioAgrupamentoDashboard from "./pages/SecretarioAgrupamentoDashboard";
+
+const isDirigente = (p) => p?.tipo === "DIRIGENTE";
+const isElemento = (p) => p?.tipo === "ELEMENTO";
+const hasFuncao = (p, f) => Array.isArray(p?.funcoes) && p.funcoes.includes(f);
+
+function getTerminologia(secaoDocId) {
+  const s = String(secaoDocId || "").toLowerCase();
+  if (s.includes("alcateia")) return { plural: "Bandos", singular: "Bando", labelObjetivosGrupo: "Objetivos (Bando)" };
+  if (s.includes("expedicao")) return { plural: "Patrulhas", singular: "Patrulha", labelObjetivosGrupo: "Objetivos (Patrulha)" };
+  if (s.includes("comunidade")) return { plural: "Equipas", singular: "Equipa", labelObjetivosGrupo: "Objetivos (Equipa)" };
+  if (s.includes("cla")) return { plural: "Tribos", singular: "Tribo", labelObjetivosGrupo: "Objetivos (Tribo)" };
+  return { plural: "Subunidades", singular: "Subunidade", labelObjetivosGrupo: "Objetivos (Grupo)" };
+}
+
+const isValidNin = (nin) => /^\d{13}$/.test(String(nin || ""));
+const ninToEmail = (nin) => `${nin}@azimute.cne`;
+
+export default function App() {
+  const [ninInput, setNinInput] = useState("");
+  const [password, setPassword] = useState("");
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [agrupamentoNome, setAgrupamentoNome] = useState("");
+  const [secaoNome, setSecaoNome] = useState("");
+  const [err, setErr] = useState("");
+  const [view, setView] = useState("dashboard");
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setLoading(true); setUser(u);
+      if (!u) { setProfile(null); setLoading(false); return; }
+      try {
+        const snap = await getDoc(doc(db, "users", u.uid));
+        if (snap.exists()) {
+          const p = snap.data(); setProfile(p);
+          const metaPromises = [];
+          if (p.agrupamentoId) metaPromises.push(getDoc(doc(db, "agrupamento", p.agrupamentoId)));
+          if (p.agrupamentoId && p.secaoDocId) metaPromises.push(getDoc(doc(db, "agrupamento", p.agrupamentoId, "secoes", p.secaoDocId)));
+          const [aSnap, sSnap] = await Promise.all(metaPromises);
+          if (aSnap?.exists()) setAgrupamentoNome(aSnap.data().nome || "");
+          if (sSnap?.exists()) setSecaoNome(sSnap.data().nome || "");
+          if (p.tipo === "ELEMENTO") setView("objetivos"); else setView("dashboard");
+        } else { setErr("Perfil não encontrado na base de dados."); }
+      } catch (e) { setErr("Erro de ligação ao servidor."); } 
+      finally { setLoading(false); }
+    });
+    return () => unsub();
+  }, []);
+
+  async function doLogin(e) {
+    e.preventDefault(); setErr("");
+    if (!isValidNin(ninInput)) { setErr("O NIN deve ter 13 dígitos."); return; }
+    try { await signInWithEmailAndPassword(auth, ninToEmail(ninInput), password); } 
+    catch (e) { setErr("Credenciais inválidas ou erro de acesso."); }
+  }
+
+  const doLogout = () => { signOut(auth); setView("dashboard"); };
+
+  const flags = useMemo(() => {
+    if (!profile) return {};
+    return {
+      isDirigente: isDirigente(profile), isElemento: isElemento(profile),
+      isCU: hasFuncao(profile, "CHEFE_UNIDADE"), isCA: hasFuncao(profile, "CHEFE_AGRUPAMENTO"),
+      isSA: hasFuncao(profile, "SECRETARIO_AGRUPAMENTO"), isGuia: profile.isGuia || profile.isSubGuia
+    };
+  }, [profile]);
+
+  const termo = useMemo(() => getTerminologia(profile?.secaoDocId), [profile?.secaoDocId]);
+  const ninFormatado = useMemo(() => { const em = String(user?.email || ""); const idx = em.indexOf("@"); return idx > 0 ? em.slice(0, idx) : em; }, [user?.email]);
+  const labelAgrupamento = useMemo(() => {
+    if (!profile?.agrupamentoId) return agrupamentoNome || "CNE";
+    const numero = profile.agrupamentoId.split('_')[0]; 
+    return `${numero} ${agrupamentoNome || ""}`.trim();
+  }, [profile?.agrupamentoId, agrupamentoNome]);
+
+  useEffect(() => {
+    if (!profile) return;
+    const fallback = flags.isElemento ? "objetivos" : "dashboard";
+    if (view === "chefe_agrupamento" && !flags.isCA) setView(fallback);
+    if (view === "secretario_agrupamento" && !flags.isSA) setView(fallback);
+    if (view === "guia_grupo" && !flags.isGuia) setView(fallback);
+    if ((view === "subunidades" || view === "cu_objetivos") && !flags.isDirigente) setView(fallback);
+  }, [view, profile, flags]);
+
+  if (loading) {
+    return (
+      <div className="az-loading-screen" style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh" }}>
+        <img src={azimuteLogo} alt="Loading..." className="az-logo-pulse" style={{ width: 80 }} />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: user ? `linear-gradient(rgba(15,27,37,0.85), rgba(11,20,27,0.95)), url(${azimuteLogo}) center center / cover fixed` : "none" }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px" }}>
+        {!user ? (
+          <div className="az-login-container">
+            <div className="az-card">
+              <div className="az-card-inner">
+                <div style={{ textAlign: 'center', marginBottom: 24 }}>
+                  <img src={azimuteLogo} alt="Logo" style={{ height: 70, borderRadius: 16, margin: "0 auto" }} />
+                  <h1 style={{ fontSize: 24, fontWeight: 900, marginTop: 12 }}>AZIMUTE</h1>
+                  <p style={{ opacity: 0.7 }}>O teu Norte! O teu Caminho!</p>
+                </div>
+                <form onSubmit={doLogin} style={{ display: "grid", gap: 16 }}>
+                  <div className="az-form-group">
+                    <label>NIN (13 dígitos)</label>
+                    <input className="az-input" value={ninInput} onChange={(e) => setNinInput(e.target.value.replace(/\D/g, "").slice(0,13))} placeholder="0000000000000" />
+                  </div>
+                  <div className="az-form-group">
+                    <label>Password</label>
+                    <input className="az-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Sua senha" />
+                  </div>
+                  <button className="az-btn az-btn-primary" disabled={!isValidNin(ninInput)}>Entrar no Agrupamento</button>
+                  {err && <div className="az-error-msg">{err}</div>}
+                </form>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="az-app-grid">
+            <header className="az-header" style={{ background: "rgba(15,27,37,0.6)", backdropFilter: "blur(10px)" }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+                <img src={azimuteLogo} style={{ height: 40, borderRadius: 8 }} alt="Az" />
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 16 }}>{profile?.nome}</div>
+                  <div style={{ fontSize: 13, opacity: 0.7 }}>NIN: {ninFormatado}</div>
+                </div>
+              </div>
+              <button className="az-btn" onClick={doLogout}>Sair</button>
+            </header>
+
+            <div className="az-breadcrumb">
+               <span><b>{labelAgrupamento}</b></span> / <span>{secaoNome || "Secção"}</span>
+            </div>
+
+            <nav className="az-tabs">
+              {flags.isElemento && <button className={`az-tab ${view === "objetivos" ? "active" : ""}`} onClick={() => setView("objetivos")}>Meus Objetivos</button>}
+              {flags.isGuia && <button className={`az-tab ${view === "guia_grupo" ? "active" : ""}`} onClick={() => setView("guia_grupo")}>{termo.labelObjetivosGrupo}</button>}
+              {flags.isDirigente && (
+                <>
+                  <button className={`az-tab ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}>Dashboard</button>
+                  <button className={`az-tab ${view === "subunidades" ? "active" : ""}`} onClick={() => setView("subunidades")}>{termo.plural}</button>
+                  <button className={`az-tab ${view === "cu_objetivos" ? "active" : ""}`} onClick={() => setView("cu_objetivos")}>Objetivos Educativos</button>
+                </>
+              )}
+              {flags.isSA && <button className={`az-tab ${view === "secretario_agrupamento" ? "active" : ""}`} onClick={() => setView("secretario_agrupamento")}>Secretaria</button>}
+              
+              {/* ALTERADO AQUI DE "Chefia" PARA "Adultos" */}
+              {flags.isCA && <button className={`az-tab ${view === "chefe_agrupamento" ? "active" : ""}`} onClick={() => setView("chefe_agrupamento")}>Adultos</button>}
+            </nav>
+
+            <main className="az-content">
+              {view === "objetivos" && <ElementoObjetivos profile={profile} />}
+              {view === "guia_grupo" && <GuiaObjetivosGrupo profile={profile} />}
+              {view === "subunidades" && <SubunidadesAdmin profile={profile} readOnly={!flags.isCU} />}
+              {view === "cu_objetivos" && <ChefeUnidadeObjetivos profile={profile} readOnly={!flags.isCU} />}
+              {view === "secretario_agrupamento" && <SecretarioAgrupamentoDashboard profile={profile} />}
+              {view === "chefe_agrupamento" && <ChefeAgrupamentoDashboard profile={profile} />}
+              {view === "dashboard" && <SecaoDashboard profile={profile} onOpenGuiaObjetivos={() => setView("guia_grupo")} />}
+            </main>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
