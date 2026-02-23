@@ -5,7 +5,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { db, functions } from "../firebase";
+import { auth, db, functions } from "../firebase"; // <-- ADICIONADO O auth AQUI
 
 import saImg from "../assets/sa.png";
 
@@ -73,7 +73,6 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
       snapUsers.forEach(d => listaElem.push({ uid: d.id, ...d.data() }));
       setElementos(listaElem.sort((a,b) => String(a.nome).localeCompare(String(b.nome))));
 
-      // BUSCA TAMBÉM OS DIRIGENTES PARA O SA PODER FAZER RESET
       const qDir = query(collection(db, "users"), where("agrupamentoId", "==", profile.agrupamentoId), where("tipo", "==", "DIRIGENTE"));
       const snapDir = await getDocs(qDir);
       const listaDir = [];
@@ -97,17 +96,17 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
     }
   }
 
+  // AQUI: Usamos auth.currentUser.uid em vez de profile.uid
   async function handleResolver(id) {
     if (!window.confirm(`Confirmas que esta alteração já foi incluída em Ordem de Serviço ou no software oficial (SIIE)?`)) return;
     try {
       const ref = doc(db, "notificacoes", id);
-      const payload = { resolvida: true, resolvidaAt: serverTimestamp(), resolvidaPorUid: profile.uid };
+      const payload = { resolvida: true, resolvidaAt: serverTimestamp(), resolvidaPorUid: auth.currentUser.uid };
       await updateDoc(ref, payload);
       setNotificacoes(prev => prev.map(n => n.id === id ? { ...n, ...payload, resolvidaAt: new Date() } : n));
     } catch (err) { alert("Erro ao atualizar o estado: " + err.message); }
   }
 
-  // NOVA FUNÇÃO: Reset de Password para Dirigentes
   async function handleResetPassword(uid, nome) {
     if (!window.confirm(`⚠️ Atenção!\nVais repor a password do dirigente ${nome}.\n\nA nova password será: Azimute2026\nO dirigente será obrigado a alterá-la no próximo login.\n\nConfirmar?`)) return;
     
@@ -136,7 +135,6 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
 
     return (
       <>
-        {/* BLOCO DE DIRIGENTES (EXCLUSIVO PARA RESET) */}
         <div className="az-card" style={{ marginBottom: 24, borderColor: "rgba(236,131,50,.3)" }}>
           <div className="az-card-inner">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--stroke)", paddingBottom: 12, marginBottom: 16 }}>
@@ -177,7 +175,6 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
           </div>
         </div>
 
-        {/* BLOCO DE SECÇÕES / ELEMENTOS */}
         {secoesIds.length === 0 ? <div className="az-muted" style={{ padding: 20 }}>Nenhum dado de secção encontrado.</div> : secoesIds.map(secId => {
           const secaoData = secoesMap[secId];
           const elementosSecao = elementos.filter(e => e.secaoDocId === secId);

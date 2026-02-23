@@ -139,6 +139,7 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
     setProgChecked(hasIt); setProgInitial(new Set(hasIt));
   }, [progObj, objetivosUsers]);
 
+  // Função para processar a aprovação individual
   async function alterarEstado(objUid, objDocId, titulo, novoEstado) {
     if (readOnly) return;
     if (!window.confirm(`Marcar o objetivo como ${novoEstado}?`)) return;
@@ -148,11 +149,41 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
       if (novoEstado === "CONFIRMADO") payload.confirmadoAt = serverTimestamp();
       if (novoEstado === "CONCLUIDO") { payload.concluidoAt = serverTimestamp(); payload.bloqueado = true; }
       if (novoEstado === "RECUSADO") payload.recusadoAt = serverTimestamp();
+      
       await updateDoc(ref, payload);
       setObjetivosUsers(prev => prev.map(item => (item.uid === objUid && item.docId === objDocId) ? { ...item, ...payload } : item));
+
+      // LÓGICA ANILHA DE MÉRITO
+      if (novoEstado === "CONCLUIDO") {
+        const catSize = catalogo.length;
+        if (catSize > 0) {
+          // Conta os já concluídos + 1 que acabamos de concluir
+          let countConcluidos = 1; 
+          objetivosUsers.forEach(o => {
+            if (o.uid === objUid && o.docId !== objDocId && o.estado === "CONCLUIDO") countConcluidos++;
+          });
+
+          if (countConcluidos === catSize) {
+            const elemento = elementos.find(e => e.uid === objUid);
+            await addDoc(collection(db, "notificacoes"), {
+              agrupamentoId: profile.agrupamentoId || null,
+              secaoDocId: profile.secaoDocId || null,
+              tipoAcao: "ANILHA_MERITO",
+              descricao: `🏅 Elegível para Anilha de Mérito (100% dos Objetivos Concluídos)`,
+              elementoNome: elemento?.nome || objUid,
+              uidElemento: objUid,
+              patrulhaId: elemento?.patrulhaId || null,
+              createdAt: serverTimestamp(),
+              resolvida: false
+            });
+          }
+        }
+      }
+
     } catch (err) { alert("Erro ao guardar."); }
   }
 
+  // Função para processar a aprovação em massa
   async function salvarProgressoEmMassa() {
     if (readOnly || !progObj) return;
     const toAdd = [...progChecked].filter(uid => !progInitial.has(uid));
@@ -177,7 +208,36 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
          const el = elementos.find(e => e.uid === uid);
          novos.push({ uid, docId: progObj, estado: "CONCLUIDO", patrulhaId: el?.patrulhaId || "sem_grupo", isGuiaOuSub: el?.isGuia || el?.isSubGuia });
       });
-      setObjetivosUsers(novos); setProgInitial(new Set(progChecked)); alert("Progresso atualizado com sucesso!");
+      setObjetivosUsers(novos); 
+      setProgInitial(new Set(progChecked)); 
+
+      // LÓGICA ANILHA DE MÉRITO (Para validação em massa)
+      const catSize = catalogo.length;
+      if (catSize > 0) {
+        for (const uid of toAdd) {
+          let countConcluidos = 1;
+          objetivosUsers.forEach(o => {
+            if (o.uid === uid && o.docId !== progObj && o.estado === "CONCLUIDO") countConcluidos++;
+          });
+
+          if (countConcluidos === catSize) {
+            const el = elementos.find(e => e.uid === uid);
+            await addDoc(collection(db, "notificacoes"), {
+              agrupamentoId: profile.agrupamentoId || null,
+              secaoDocId: profile.secaoDocId || null,
+              tipoAcao: "ANILHA_MERITO",
+              descricao: `🏅 Elegível para Anilha de Mérito (100% dos Objetivos Concluídos)`,
+              elementoNome: el?.nome || uid,
+              uidElemento: uid,
+              patrulhaId: el?.patrulhaId || null,
+              createdAt: serverTimestamp(),
+              resolvida: false
+            });
+          }
+        }
+      }
+
+      alert("Progresso atualizado com sucesso!");
     } catch(err) { alert("Erro ao guardar progresso."); } finally { setLoading(false); }
   }
 
