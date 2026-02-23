@@ -3,8 +3,15 @@
  2026-02-16 - Joao Taveira (jltaveira@gmail.com) */
 
 import { useEffect, useMemo, useState } from "react";
-import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { 
+  signInWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  updatePassword
+} from "firebase/auth";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
 import azimuteLogo from "./assets/azimute.png"; 
@@ -44,6 +51,14 @@ export default function App() {
   const [err, setErr] = useState("");
   const [view, setView] = useState("dashboard");
 
+  // --- Estados para Mudança de Password ---
+  const [showPwdModal, setShowPwdModal] = useState(false);
+  const [pwdCurrent, setPwdCurrent] = useState("");
+  const [pwdNew, setPwdNew] = useState("");
+  const [pwdConfirm, setPwdConfirm] = useState("");
+  const [pwdErr, setPwdErr] = useState("");
+  const [pwdSuccess, setPwdSuccess] = useState("");
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setLoading(true); setUser(u);
@@ -74,6 +89,63 @@ export default function App() {
   }
 
   const doLogout = () => { signOut(auth); setView("dashboard"); };
+
+  // --- Lógica: Mudança de Password (Vontade Própria) ---
+  async function handleChangePassword(e) {
+    e.preventDefault();
+    setPwdErr(""); setPwdSuccess("");
+
+    if (pwdNew !== pwdConfirm) { setPwdErr("As novas passwords não coincidem."); return; }
+    if (pwdNew.length < 6) { setPwdErr("A nova password tem de ter pelo menos 6 caracteres."); return; }
+
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) return;
+
+      const credential = EmailAuthProvider.credential(currentUser.email, pwdCurrent);
+      await reauthenticateWithCredential(currentUser, credential);
+      await updatePassword(currentUser, pwdNew);
+      
+      setPwdSuccess("Password alterada com sucesso!");
+      setTimeout(() => {
+        setShowPwdModal(false);
+        setPwdCurrent(""); setPwdNew(""); setPwdConfirm(""); setPwdSuccess("");
+      }, 2000);
+
+    } catch (error) {
+      if (error.code === 'auth/invalid-credential') {
+        setPwdErr("A password atual está incorreta.");
+      } else {
+        setPwdErr("Erro ao alterar password. Tenta novamente.");
+      }
+    }
+  }
+
+  // --- Lógica: Mudança de Password (Forçada após Reset da Chefia) ---
+  async function handleForcedPasswordChange(e) {
+    e.preventDefault();
+    setPwdErr(""); setPwdSuccess("");
+
+    if (pwdNew !== pwdConfirm) { setPwdErr("As passwords não coincidem."); return; }
+    if (pwdNew.length < 6) { setPwdErr("Tem de ter pelo menos 6 caracteres."); return; }
+
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) return;
+
+      await updatePassword(currentUser, pwdNew);
+      
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        forcarMudancaPassword: false,
+        updatedAt: new Date()
+      });
+
+      setProfile(prev => ({ ...prev, forcarMudancaPassword: false }));
+      setPwdNew(""); setPwdConfirm("");
+    } catch (error) {
+      setPwdErr("Sessão expirada ou erro. Faz logout e login novamente com a password predefinida.");
+    }
+  }
 
   const flags = useMemo(() => {
     if (!profile) return {};
@@ -112,6 +184,8 @@ export default function App() {
   return (
     <div style={{ minHeight: "100vh", background: user ? `linear-gradient(rgba(15,27,37,0.85), rgba(11,20,27,0.95)), url(${azimuteLogo}) center center / cover fixed` : "none" }}>
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px" }}>
+        
+        {/* 1. SE NÃO HÁ UTILIZADOR: MOSTRA O LOGIN */}
         {!user ? (
           <div className="az-login-container">
             <div className="az-card">
@@ -136,6 +210,40 @@ export default function App() {
               </div>
             </div>
           </div>
+
+        // 2. SE HÁ UTILIZADOR MAS FOI ALVO DE RESET: TRANCA O ECRÃ AQUI
+        ) : profile?.forcarMudancaPassword ? (
+          <div className="az-login-container" style={{ marginTop: "10vh" }}>
+            <div className="az-card" style={{ borderColor: "var(--brand-orange)" }}>
+              <div className="az-card-inner">
+                <div style={{ textAlign: "center", marginBottom: 20 }}>
+                  <div style={{ fontSize: 40 }}>⚠️</div>
+                  <h2 className="az-h2" style={{ color: "var(--brand-orange)", marginTop: 8 }}>Mudança Obrigatória</h2>
+                  <p className="az-muted az-small">A tua password foi reiniciada pela Chefia. Define agora a tua nova password secreta para entrares no Azimute.</p>
+                </div>
+
+                <form onSubmit={handleForcedPasswordChange} style={{ display: "grid", gap: 16 }}>
+                  <div className="az-form-group">
+                    <label>Nova Password</label>
+                    <input type="password" required className="az-input" value={pwdNew} onChange={e => setPwdNew(e.target.value)} placeholder="Mínimo 6 caracteres" />
+                  </div>
+                  <div className="az-form-group">
+                    <label>Confirmar Password</label>
+                    <input type="password" required className="az-input" value={pwdConfirm} onChange={e => setPwdConfirm(e.target.value)} placeholder="Repete a password" />
+                  </div>
+                  
+                  {pwdErr && <div className="az-alert az-alert--error">{pwdErr}</div>}
+                  
+                  <button className="az-btn az-btn-primary" type="submit" style={{ fontWeight: 800, padding: 14 }}>💾 Guardar e Entrar</button>
+                </form>
+                <div style={{ textAlign: "center", marginTop: 16 }}>
+                  <button className="az-btn" style={{ fontSize: 12 }} onClick={doLogout}>Cancelar e Sair</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        // 3. SE ESTÁ TUDO OK: MOSTRA A APLICAÇÃO NORMAL
         ) : (
           <div className="az-app-grid">
             <header className="az-header" style={{ background: "rgba(15,27,37,0.6)", backdropFilter: "blur(10px)" }}>
@@ -146,7 +254,11 @@ export default function App() {
                   <div style={{ fontSize: 13, opacity: 0.7 }}>NIN: {ninFormatado}</div>
                 </div>
               </div>
-              <button className="az-btn" onClick={doLogout}>Sair</button>
+              
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="az-btn" style={{ borderColor: "rgba(255,255,255,0.2)" }} onClick={() => setShowPwdModal(true)}>🔑 Mudar Password</button>
+                <button className="az-btn" onClick={doLogout}>Sair</button>
+              </div>
             </header>
 
             <div className="az-breadcrumb">
@@ -164,8 +276,6 @@ export default function App() {
                 </>
               )}
               {flags.isSA && <button className={`az-tab ${view === "secretario_agrupamento" ? "active" : ""}`} onClick={() => setView("secretario_agrupamento")}>Secretaria</button>}
-              
-              {/* ALTERADO AQUI DE "Chefia" PARA "Adultos" */}
               {flags.isCA && <button className={`az-tab ${view === "chefe_agrupamento" ? "active" : ""}`} onClick={() => setView("chefe_agrupamento")}>Adultos</button>}
             </nav>
 
@@ -178,6 +288,41 @@ export default function App() {
               {view === "chefe_agrupamento" && <ChefeAgrupamentoDashboard profile={profile} />}
               {view === "dashboard" && <SecaoDashboard profile={profile} onOpenGuiaObjetivos={() => setView("guia_grupo")} />}
             </main>
+
+            {/* MODAL MUDAR PASSWORD (VONTADE PRÓPRIA) */}
+            {showPwdModal && (
+              <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(5px)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "center" }}>
+                <div className="az-card" style={{ width: "100%", maxWidth: 400, background: "var(--bg-dark)" }}>
+                  <div className="az-card-inner">
+                    <h3 style={{ margin: "0 0 16px 0", borderBottom: "1px solid var(--stroke)", paddingBottom: 8 }}>🔑 Mudar Password</h3>
+                    
+                    <form onSubmit={handleChangePassword} style={{ display: "grid", gap: 16 }}>
+                      <div className="az-form-group">
+                        <label>Password Atual</label>
+                        <input type="password" required className="az-input" value={pwdCurrent} onChange={e => setPwdCurrent(e.target.value)} />
+                      </div>
+                      <div className="az-form-group">
+                        <label>Nova Password</label>
+                        <input type="password" required className="az-input" value={pwdNew} onChange={e => setPwdNew(e.target.value)} />
+                      </div>
+                      <div className="az-form-group">
+                        <label>Confirmar Nova Password</label>
+                        <input type="password" required className="az-input" value={pwdConfirm} onChange={e => setPwdConfirm(e.target.value)} />
+                      </div>
+
+                      {pwdErr && <div className="az-small" style={{ color: "var(--danger)" }}>{pwdErr}</div>}
+                      {pwdSuccess && <div className="az-small" style={{ color: "var(--brand-green)", fontWeight: 800 }}>{pwdSuccess}</div>}
+
+                      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 8 }}>
+                        <button type="button" className="az-btn" onClick={() => { setShowPwdModal(false); setPwdErr(""); setPwdCurrent(""); setPwdNew(""); setPwdConfirm(""); }}>Cancelar</button>
+                        <button type="submit" className="az-btn az-btn-teal" style={{ fontWeight: 800 }}>Guardar Nova Password</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            )}
+
           </div>
         )}
       </div>

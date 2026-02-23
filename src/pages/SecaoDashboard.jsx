@@ -4,7 +4,8 @@ src/pages/SecaoDashboard.jsx
 
 import { useEffect, useMemo, useState } from "react";
 import { collection, doc, getDoc, getDocs, query, where, updateDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import { db, auth } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, auth, functions } from "../firebase";
 
 import pataTenra from "../assets/patatenra.png";
 import loboValente from "../assets/lobovalente.png";
@@ -55,6 +56,7 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
   const [errSubs, setErrSubs] = useState("");
   const [errMembros, setErrMembros] = useState("");
   const [info, setInfo] = useState("");
+  const [resettingUid, setResettingUid] = useState(null);
 
   const agrupamentoId = profile?.agrupamentoId;
   const secaoDocId = profile?.secaoDocId;
@@ -114,12 +116,8 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
   }, [agrupamentoId, secaoDocId, souDirigente, souChefeUnidade, souGuia, souSubGuia, profile?.patrulhaId]);
 
   const membrosByUid = useMemo(() => { const map = new Map(); for (const m of membros) map.set(m.uid, m); return map; }, [membros]);
-  
   const subunidadesOrdenadas = useMemo(() => { const s = [...subunidades]; s.sort((a, b) => String(a.nome || a.id).localeCompare(String(b.nome || b.id))); return s; }, [subunidades]);
-  
-  // AQUI: Usamos esta variável para esconder as inativas da caixa da esquerda!
   const subunidadesAtivasOrdenadas = useMemo(() => subunidadesOrdenadas.filter((x) => x.ativo === true), [subunidadesOrdenadas]);
-  
   const dirigentes = useMemo(() => membros.filter((m) => isDirigente(m)), [membros]);
   const elementos = useMemo(() => membros.filter((m) => isElemento(m)), [membros]);
 
@@ -152,6 +150,22 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
       }
       setInfo("Alterações gravadas!"); setTimeout(() => setInfo(""), 3000);
     } catch (e) { setErrMembros("Erro ao atualizar: " + e.message); }
+  }
+
+  // NOVA FUNÇÃO: Reset de Password
+  async function handleResetPassword(uid, nome) {
+    if (!window.confirm(`⚠️ Atenção!\nVais repor a password de ${nome}.\n\nA nova password será: Azimute2026\nO elemento será obrigado a alterá-la no próximo login.\n\nConfirmar?`)) return;
+    
+    setResettingUid(uid);
+    try {
+      const resetPwd = httpsCallable(functions, 'resetUserPassword');
+      await resetPwd({ uid });
+      alert(`✅ Password de ${nome} reposta com sucesso!`);
+    } catch (error) {
+      alert("❌ Erro ao repor password: " + error.message);
+    } finally {
+      setResettingUid(null);
+    }
   }
 
   const etapaId = profile?.etapaProgresso || "";
@@ -216,7 +230,6 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
               </div>
             )}
             
-            {/* ESTRUTURA DE BANDOS - APENAS ATIVOS AQUI */}
             <div className="az-card">
               <div className="az-card-inner">
                 <h3 style={{ margin: "0 0 12px", borderBottom: "1px solid var(--stroke)", paddingBottom: 8 }}>⛺ Estrutura de {nomeSubunidades}</h3>
@@ -240,7 +253,6 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
             </div>
           </div>
 
-          {/* LISTA DE ELEMENTOS */}
           <div className="az-card">
             <div className="az-card-inner">
               <h3 style={{ margin: "0 0 12px", borderBottom: "1px solid var(--stroke)", paddingBottom: 8 }}>👦 {nomeElementoLista}</h3>
@@ -251,8 +263,6 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
                     <div key={grupoId}>
                       <div style={{ fontWeight: 800, color: "var(--brand-teal)", marginBottom: 8, display: "flex", alignItems: "center" }}>
                         {sub?.nome || (grupoId === "sem_grupo" ? "Elementos sem unidade" : grupoId)}
-                        
-                        {/* AVISO SE O ELEMENTO ESTIVER NUMA UNIDADE INATIVA */}
                         {sub && !sub.ativo && (
                           <span className="az-pill" style={{ marginLeft: 8, fontSize: 10, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.2)" }}>
                             Inativa
@@ -275,6 +285,17 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
                             {souChefeUnidade ? (
                               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                                 
+                                {/* BOTÃO DE RESET AQUI */}
+                                <button 
+                                  className="az-btn" 
+                                  style={{ padding: "5px 8px", fontSize: 11, borderColor: "rgba(236,131,50,.5)", color: "var(--brand-orange)", background: "rgba(236,131,50,.05)" }} 
+                                  title="Repor Password" 
+                                  onClick={() => handleResetPassword(e.uid, e.nome)} 
+                                  disabled={resettingUid === e.uid}
+                                >
+                                  {resettingUid === e.uid ? "⏳" : "🔑 Reset"}
+                                </button>
+
                                 <input 
                                   className="az-input" 
                                   style={{ padding: "6px 10px", width: "130px", fontSize: 13 }} 

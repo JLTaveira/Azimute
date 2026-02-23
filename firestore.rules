@@ -72,8 +72,8 @@ service cloud.firestore {
       // Regras de Edição de Perfil (Centralizadas num único bloco)
       allow update: if signedIn() && (
         
-        // 1. O Próprio (Apenas timestamps)
-        (request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt']))
+        // 1. O Próprio (Apenas timestamps e flag de password)
+        (request.auth.uid == userId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt', 'forcarMudancaPassword']))
         
         || 
         // 2. Chefe de Unidade (Pode editar colocação, guia e totem)

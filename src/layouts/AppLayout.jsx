@@ -51,7 +51,7 @@ export default function AppLayout({
   });
 
   return (
-    <div style={{ maxWidth: 1180, margin: "28px auto", padding: "0 16px" }}>
+    <div style={{ maxWidth: 1180, margin: "28px auto", padding: "0 16px", display: "flex", flexDirection: "column", minHeight: "calc(100vh - 56px)" }}>
       
       {/* Topbar */}
       <div className="az-card" style={{ marginBottom: 14 }}>
@@ -80,7 +80,8 @@ export default function AppLayout({
         display: "grid", 
         gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", // Melhora a responsividade
         gap: 14, 
-        alignItems: "start" 
+        alignItems: "start",
+        flex: 1 // Faz com que o conteúdo empurre o footer para o fundo
       }}>
         
         {/* Sidebar (Fixamos largura apenas em ecrãs grandes via inline-style ou mantemos o teu original) */}
@@ -133,7 +134,7 @@ export default function AppLayout({
             {/* Menu para Chefe de Agrupamento */}
             {canSeeChefeAgrupamento && (
               <button className="az-btn" onClick={() => setView("chefe_agrupamento")} style={btnStyle("chefe_agrupamento")}>
-                🏢 Gestão de Chefia
+                🏢 Adultos
               </button>
             )}
 
@@ -151,6 +152,18 @@ export default function AppLayout({
           </div>
         </div>
       </div>
+
+      {/* RODAPÉ GLOBAL (COPYRIGHT) */}
+      <footer style={{ 
+        textAlign: "center", 
+        padding: "24px 0 12px 0", 
+        fontSize: 12, 
+        opacity: 0.5, 
+        color: "var(--text)" 
+      }}>
+        ©2026 João Taveira (Agrupamento 1104 - Paranhos) - Todos os direitos reservados | GPE - Gestão Progresso Escutista
+      </footer>
+
     </div>
   );
 }

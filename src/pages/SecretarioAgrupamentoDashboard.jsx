@@ -2,24 +2,19 @@
   src/pages/SecretarioAgrupamentoDashboard.jsx
  2026-02-20 - Joao Taveira (jltaveira@gmail.com) */
 
-/* SECRETARIOAGRUPAMENTODASHBOARD.jsx - Correção do campo NIN
-   Painel do Secretário com vista de Efetivo e Formatação de Notificações
-   2026-02-22 - Azimute Helper */
-
 import { useEffect, useState, useMemo } from "react";
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../firebase";
 
 import saImg from "../assets/sa.png";
 
-// Helpers de formatação
 function formatarData(timestamp) {
   if (!timestamp || !timestamp.toDate) return "Data desconhecida";
   const d = timestamp.toDate();
   return d.toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-// Mantemos como fallback caso algum user antigo não tenha o campo nin
 function extractNIN(email) {
   if (!email) return "Sem NIN";
   return email.split("@")[0];
@@ -53,7 +48,9 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
 
   const [notificacoes, setNotificacoes] = useState([]);
   const [elementos, setElementos] = useState([]);
+  const [dirigentes, setDirigentes] = useState([]);
   const [secoesMap, setSecoesMap] = useState({});
+  const [resettingUid, setResettingUid] = useState(null);
 
   useEffect(() => {
     if (!profile?.agrupamentoId) return;
@@ -61,19 +58,13 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
   }, [profile]);
 
   async function fetchDadosSecretaria() {
-    setLoading(true);
-    setErro("");
+    setLoading(true); setErro("");
     try {
       const qNotif = query(collection(db, "notificacoes"), where("agrupamentoId", "==", profile.agrupamentoId));
       const snapNotif = await getDocs(qNotif);
       const listaNotif = [];
       snapNotif.forEach(d => listaNotif.push({ id: d.id, ...d.data() }));
-      
-      listaNotif.sort((a, b) => {
-        const dataA = a.createdAt?.toMillis() || 0;
-        const dataB = b.createdAt?.toMillis() || 0;
-        return dataB - dataA;
-      });
+      listaNotif.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
       setNotificacoes(listaNotif);
 
       const qUsers = query(collection(db, "users"), where("agrupamentoId", "==", profile.agrupamentoId), where("tipo", "==", "ELEMENTO"));
@@ -82,15 +73,20 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
       snapUsers.forEach(d => listaElem.push({ uid: d.id, ...d.data() }));
       setElementos(listaElem.sort((a,b) => String(a.nome).localeCompare(String(b.nome))));
 
+      // BUSCA TAMBÉM OS DIRIGENTES PARA O SA PODER FAZER RESET
+      const qDir = query(collection(db, "users"), where("agrupamentoId", "==", profile.agrupamentoId), where("tipo", "==", "DIRIGENTE"));
+      const snapDir = await getDocs(qDir);
+      const listaDir = [];
+      snapDir.forEach(d => listaDir.push({ uid: d.id, ...d.data() }));
+      setDirigentes(listaDir.sort((a,b) => String(a.nome).localeCompare(String(b.nome))));
+
       const secSnap = await getDocs(collection(db, "agrupamento", profile.agrupamentoId, "secoes"));
       const estrutura = {};
       
       for (const sDoc of secSnap.docs) {
         estrutura[sDoc.id] = { nome: sDoc.data().nome || sDoc.id, subunidades: {} };
         const subsSnap = await getDocs(collection(db, "agrupamento", profile.agrupamentoId, "secoes", sDoc.id, "subunidades"));
-        subsSnap.forEach(subDoc => {
-          estrutura[sDoc.id].subunidades[subDoc.id] = subDoc.data().nome || subDoc.id;
-        });
+        subsSnap.forEach(subDoc => { estrutura[sDoc.id].subunidades[subDoc.id] = subDoc.data().nome || subDoc.id; });
       }
       setSecoesMap(estrutura);
 
@@ -108,8 +104,22 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
       const payload = { resolvida: true, resolvidaAt: serverTimestamp(), resolvidaPorUid: profile.uid };
       await updateDoc(ref, payload);
       setNotificacoes(prev => prev.map(n => n.id === id ? { ...n, ...payload, resolvidaAt: new Date() } : n));
-    } catch (err) {
-      alert("Erro ao atualizar o estado: " + err.message);
+    } catch (err) { alert("Erro ao atualizar o estado: " + err.message); }
+  }
+
+  // NOVA FUNÇÃO: Reset de Password para Dirigentes
+  async function handleResetPassword(uid, nome) {
+    if (!window.confirm(`⚠️ Atenção!\nVais repor a password do dirigente ${nome}.\n\nA nova password será: Azimute2026\nO dirigente será obrigado a alterá-la no próximo login.\n\nConfirmar?`)) return;
+    
+    setResettingUid(uid);
+    try {
+      const resetPwd = httpsCallable(functions, 'resetUserPassword');
+      await resetPwd({ uid });
+      alert(`✅ Password de ${nome} reposta com sucesso!`);
+    } catch (error) {
+      alert("❌ Erro ao repor password: " + error.message);
+    } finally {
+      setResettingUid(null);
     }
   }
 
@@ -124,79 +134,122 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
   const renderEfetivo = () => {
     const secoesIds = Object.keys(secoesMap).sort(sortSecoes);
 
-    if (secoesIds.length === 0) return <div className="az-muted" style={{ padding: 20 }}>Nenhum dado de secção encontrado.</div>;
-
-    return secoesIds.map(secId => {
-      const secaoData = secoesMap[secId];
-      const elementosSecao = elementos.filter(e => e.secaoDocId === secId);
-      const termoGrupo = getTermoSubunidade(secId);
-      
-      const elementosPorSub = {};
-      elementosSecao.forEach(e => {
-        const pId = e.patrulhaId || "sem_grupo";
-        if (!elementosPorSub[pId]) elementosPorSub[pId] = [];
-        elementosPorSub[pId].push(e);
-      });
-
-      return (
-        <div key={secId} className="az-card" style={{ marginBottom: 24 }}>
+    return (
+      <>
+        {/* BLOCO DE DIRIGENTES (EXCLUSIVO PARA RESET) */}
+        <div className="az-card" style={{ marginBottom: 24, borderColor: "rgba(236,131,50,.3)" }}>
           <div className="az-card-inner">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--stroke)", paddingBottom: 12, marginBottom: 16 }}>
-              <h3 className="az-h2" style={{ margin: 0, fontSize: 20, color: "var(--brand-teal)" }}>{secaoData.nome}</h3>
-              <span className="az-pill">👥 {elementosSecao.length} Elementos</span>
+              <h3 className="az-h2" style={{ margin: 0, fontSize: 20, color: "var(--brand-orange)" }}>Equipa de Animação (Dirigentes)</h3>
+              <span className="az-pill">👥 {dirigentes.length} Dirigentes</span>
             </div>
-
-            {Object.keys(elementosPorSub).length === 0 ? (
-              <p className="az-muted">Sem elementos registados nesta secção.</p>
-            ) : (
-              <div className="az-grid" style={{ gap: 20 }}>
-                {Object.entries(elementosPorSub).sort(([a], [b]) => a.localeCompare(b)).map(([subId, lista]) => {
-                  const nomeSub = secaoData.subunidades[subId] || (subId === "sem_grupo" ? "Sem Unidade Atribuída" : subId);
-                  
-                  return (
-                    <div key={subId}>
-                      <h4 style={{ margin: "0 0 8px 0", color: "var(--text)", opacity: 0.9 }}>
-                        {subId === "sem_grupo" ? "⚠️ " : `⛺ ${termoGrupo}: `} {nomeSub}
-                      </h4>
-                      
-                      <div className="az-table-wrap">
-                        <table className="az-table" style={{ fontSize: 13 }}>
-                          <thead>
-                            <tr>
-                              <th style={{ width: 120 }}>NIN</th>
-                              <th>Nome</th>
-                              <th>Tótem</th>
-                              <th>Cargo</th>
-                              <th>Etapa de Progresso</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {lista.map(el => (
-                              <tr key={el.uid}>
-                                {/* LÊ O CAMPO 'nin' DIRETAMENTE AQUI */}
-                                <td style={{ fontFamily: "monospace", color: "var(--muted)" }}>{el.nin || extractNIN(el.email)}</td>
-                                <td style={{ fontWeight: 600, color: "var(--text)" }}>{el.nome}</td>
-                                <td>{el.totem || <span style={{ opacity: 0.3 }}>-</span>}</td>
-                                <td>
-                                  {el.isGuia ? <span className="az-pill" style={{ fontSize: 10, background: "rgba(236,131,50,.15)", color: "var(--brand-orange)", border: "none" }}>Guia</span> :
-                                   el.isSubGuia ? <span className="az-pill" style={{ fontSize: 10, background: "rgba(236,131,50,.1)", color: "var(--brand-orange)", border: "none" }}>Sub-Guia</span> : 
-                                   <span style={{ opacity: 0.3 }}>-</span>}
-                                </td>
-                                <td>{nomeEtapa(el.etapaProgresso)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <div className="az-table-wrap">
+              <table className="az-table" style={{ fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: 120 }}>NIN</th>
+                    <th>Nome</th>
+                    <th>Cargo / Funções</th>
+                    <th style={{ textAlign: "right" }}>Ações Secretaria</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dirigentes.map(dir => (
+                    <tr key={dir.uid}>
+                      <td style={{ fontFamily: "monospace", color: "var(--muted)" }}>{dir.nin || extractNIN(dir.email)}</td>
+                      <td style={{ fontWeight: 600, color: "var(--text)" }}>{dir.nome}</td>
+                      <td>{dir.funcoes?.join(", ").replace(/_/g, " ") || "-"}</td>
+                      <td style={{ textAlign: "right" }}>
+                        <button 
+                          className="az-btn" 
+                          style={{ padding: "4px 10px", fontSize: 11, borderColor: "rgba(236,131,50,.5)", color: "var(--brand-orange)", background: "rgba(236,131,50,.05)" }} 
+                          onClick={() => handleResetPassword(dir.uid, dir.nome)} 
+                          disabled={resettingUid === dir.uid}
+                        >
+                          {resettingUid === dir.uid ? "⏳" : "🔑 Reset Pass"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-      );
-    });
+
+        {/* BLOCO DE SECÇÕES / ELEMENTOS */}
+        {secoesIds.length === 0 ? <div className="az-muted" style={{ padding: 20 }}>Nenhum dado de secção encontrado.</div> : secoesIds.map(secId => {
+          const secaoData = secoesMap[secId];
+          const elementosSecao = elementos.filter(e => e.secaoDocId === secId);
+          const termoGrupo = getTermoSubunidade(secId);
+          const elementosPorSub = {};
+          
+          elementosSecao.forEach(e => {
+            const pId = e.patrulhaId || "sem_grupo";
+            if (!elementosPorSub[pId]) elementosPorSub[pId] = [];
+            elementosPorSub[pId].push(e);
+          });
+
+          return (
+            <div key={secId} className="az-card" style={{ marginBottom: 24 }}>
+              <div className="az-card-inner">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--stroke)", paddingBottom: 12, marginBottom: 16 }}>
+                  <h3 className="az-h2" style={{ margin: 0, fontSize: 20, color: "var(--brand-teal)" }}>{secaoData.nome}</h3>
+                  <span className="az-pill">👥 {elementosSecao.length} Elementos</span>
+                </div>
+
+                {Object.keys(elementosPorSub).length === 0 ? (
+                  <p className="az-muted">Sem elementos registados nesta secção.</p>
+                ) : (
+                  <div className="az-grid" style={{ gap: 20 }}>
+                    {Object.entries(elementosPorSub).sort(([a], [b]) => a.localeCompare(b)).map(([subId, lista]) => {
+                      const nomeSub = secaoData.subunidades[subId] || (subId === "sem_grupo" ? "Sem Unidade Atribuída" : subId);
+                      
+                      return (
+                        <div key={subId}>
+                          <h4 style={{ margin: "0 0 8px 0", color: "var(--text)", opacity: 0.9 }}>
+                            {subId === "sem_grupo" ? "⚠️ " : `⛺ ${termoGrupo}: `} {nomeSub}
+                          </h4>
+                          
+                          <div className="az-table-wrap">
+                            <table className="az-table" style={{ fontSize: 13 }}>
+                              <thead>
+                                <tr>
+                                  <th style={{ width: 120 }}>NIN</th>
+                                  <th>Nome</th>
+                                  <th>Tótem</th>
+                                  <th>Cargo</th>
+                                  <th>Etapa de Progresso</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {lista.map(el => (
+                                  <tr key={el.uid}>
+                                    <td style={{ fontFamily: "monospace", color: "var(--muted)" }}>{el.nin || extractNIN(el.email)}</td>
+                                    <td style={{ fontWeight: 600, color: "var(--text)" }}>{el.nome}</td>
+                                    <td>{el.totem || <span style={{ opacity: 0.3 }}>-</span>}</td>
+                                    <td>
+                                      {el.isGuia ? <span className="az-pill" style={{ fontSize: 10, background: "rgba(236,131,50,.15)", color: "var(--brand-orange)", border: "none" }}>Guia</span> :
+                                      el.isSubGuia ? <span className="az-pill" style={{ fontSize: 10, background: "rgba(236,131,50,.1)", color: "var(--brand-orange)", border: "none" }}>Sub-Guia</span> : 
+                                      <span style={{ opacity: 0.3 }}>-</span>}
+                                    </td>
+                                    <td>{nomeEtapa(el.etapaProgresso)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </>
+    );
   };
 
   if (loading) return <div className="az-loading-screen"><div className="az-logo-pulse">⏳</div></div>;
@@ -243,10 +296,7 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
                   <tbody>
                     {notificacoesFiltradas.map(notif => {
                       const elEncontrado = elementos.find(e => e.uid === notif.uidElemento);
-                      
-                      // LÊ O CAMPO 'nin' DIRETAMENTE AQUI TAMBÉM
                       const ninText = elEncontrado?.nin || extractNIN(elEncontrado?.email);
-                      
                       const secaoNomeLimpo = secoesMap[notif.secaoDocId || notif.secao]?.nome || notif.secaoDocId || notif.secao || "Geral";
 
                       return (
