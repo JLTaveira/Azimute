@@ -2,11 +2,6 @@
 src/layouts/AppLayout.jsx
  2026-02-21 - Joao Taveira (jltaveira@gmail.com) */
 
-
-/* APPLAYOUT.jsx - Versão Optimizada
-   Adicionado suporte para Secretário e Centralização de Terminologia
-   2026-02-22 - Azimute Helper */
-
 import azimuteLogo from "../assets/azimute.png";
 
 // Centralizamos a terminologia para ser mais fácil de manter
@@ -55,23 +50,51 @@ export default function AppLayout({
       
       {/* Topbar */}
       <div className="az-card" style={{ marginBottom: 14 }}>
-        <div className="az-card-inner" style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-          <img
-            src={azimuteLogo}
-            alt="Azimute"
-            style={{ height: 44, width: 44, borderRadius: 12, objectFit: "cover", border: "1px solid rgba(255,255,255,.12)" }}
-          />
-          <div style={{ display: "grid" }}>
-            <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: 0.5 }}>AZIMUTE</div>
-            <div style={{ opacity: 0.75, fontSize: 13 }}>O teu Norte!... O teu Caminho!</div>
+        <div className="az-card-inner">
+          <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+            <img
+              src={azimuteLogo}
+              alt="Azimute"
+              style={{ height: 44, width: 44, borderRadius: 12, objectFit: "cover", border: "1px solid rgba(255,255,255,.12)" }}
+            />
+            <div style={{ display: "grid" }}>
+              <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: 0.5 }}>AZIMUTE</div>
+              <div style={{ opacity: 0.75, fontSize: 13 }}>GPE - Gestão Progresso Escutista</div>
+            </div>
+
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span className="az-pill">
+                {userLabel || "Olá"} {profile?.secaoNome ? `• ${profile.secaoNome}` : profile?.secaoDocId ? `• ${secaoTitle}` : ""}
+              </span>
+              <button className="az-btn" onClick={onLogout}>Sair</button>
+            </div>
           </div>
 
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <span className="az-pill">
-              {userLabel || "Olá"} {profile?.secaoNome ? `• ${profile.secaoNome}` : profile?.secaoDocId ? `• ${secaoTitle}` : ""}
-            </span>
-            <button className="az-btn" onClick={onLogout}>Sair</button>
+          {/* 🚨 NOVA BARRA INTEGRADA COM SLOGAN E COPYRIGHT 🚨 */}
+          <div style={{ 
+            display: "flex", 
+            justifyContent: "space-between", 
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "10px",
+            marginTop: "16px", 
+            paddingTop: "12px", 
+            borderTop: "1px solid rgba(255,255,255,0.08)", 
+            fontSize: "11px", 
+            color: "var(--text)", 
+            opacity: 0.6 
+          }}>
+            {/* Lado Esquerdo: Slogan do Sistema */}
+            <div style={{ fontWeight: 700, letterSpacing: "0.5px", color: "var(--brand-teal)" }}>
+              AZIMUTE - O teu Norte! O teu caminho!
+            </div>
+            
+            {/* Lado Direito: Copyright */}
+            <div>
+              ©2026 João Taveira (Agrupamento 1104 - Paranhos) - Todos os direitos reservados
+            </div>
           </div>
+
         </div>
       </div>
 
@@ -152,18 +175,6 @@ export default function AppLayout({
           </div>
         </div>
       </div>
-
-      {/* RODAPÉ GLOBAL (COPYRIGHT) */}
-      <footer style={{ 
-        textAlign: "center", 
-        padding: "24px 0 12px 0", 
-        fontSize: 12, 
-        opacity: 0.5, 
-        color: "var(--text)" 
-      }}>
-        ©2026 João Taveira (Agrupamento 1104 - Paranhos) - Todos os direitos reservados | GPE - Gestão Progresso Escutista
-      </footer>
-
     </div>
   );
 }

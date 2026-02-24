@@ -2,7 +2,7 @@
   src/pages/SecretarioAgrupamentoDashboard.jsx
  2026-02-20 - Joao Taveira (jltaveira@gmail.com) */
 
-import { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, Fragment } from "react";
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp, addDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../firebase";
@@ -143,13 +143,15 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
       await toggleFn({ uid: toggleResult.uid, ativo: newState });
 
       const msgOS = newState ? "Voltou ao ativo!" : "Saiu do ativo!";
+      const nin = toggleResult.nin || extractNIN(toggleResult.email);
+      const dataOS = new Date().toLocaleString('pt-PT');
 
       await addDoc(collection(db, "notificacoes"), {
         agrupamentoId: profile.agrupamentoId,
         uidElemento: toggleResult.uid,
         elementoNome: toggleResult.nome,
         secaoDocId: toggleResult.secaoDocId || "GERAL",
-        descricao: msgOS, // O frontend vai montar a string completa na tabela
+        descricao: `${dataOS} | ${nin} | ${toggleResult.nome} | ${msgOS}`,
         tipo: "ESTADO_CONTA",
         resolvida: false,
         createdAt: serverTimestamp()
@@ -237,7 +239,7 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
     try {
       const funcImport = httpsCallable(functions, 'importUsersBatch');
       const res = await funcImport({ users: validos });
-      alert(`✅ Importação concluída! Sucessos: ${res.data.success}. Verifica a Caixa de Entrada para confirmares em OS/SIIE.`);
+      alert(`✅ Importação concluída! Sucessos: ${res.data.success}. Mensagens geradas para a Caixa de Entrada.`);
       setUploadList([]); fetchDadosSecretaria();
     } catch (error) { alert("Erro na importação."); } finally { setImporting(false); }
   }
@@ -254,7 +256,7 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
         <div className="az-card-inner az-row" style={{ justifyContent: "space-between" }}>
           <div>
             <h2 className="az-h2" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <img src={saImg} alt="SA" style={{ height: 32 }} /> Secretaria
+              <img src={saImg} alt="SA" style={{ height: 32 }} /> Secretário de Agrupamento
             </h2>
             <p className="az-muted az-small">Gestão de Efetivos e O.S. / SIIE.</p>
           </div>
@@ -262,7 +264,7 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
       </div>
 
       <div className="az-tabs">
-        <button className={`az-tab ${filtro === "PENDENTES" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PENDENTES")}>📥 Caixa de Entrada ({contagemPendentes})</button>
+        <button className={`az-tab ${filtro === "PENDENTES" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PENDENTES")}>📥 Ações Pendentes ({contagemPendentes})</button>
         <button className={`az-tab ${filtro === "RESOLVIDAS" ? "az-tab--active" : ""}`} onClick={() => setFiltro("RESOLVIDAS")}>🗄️ Arquivo / Emitidas</button>
         <button className={`az-tab ${filtro === "EFETIVO" ? "az-tab--active" : ""}`} onClick={() => setFiltro("EFETIVO")}>👥 Efetivo Global (Consulta)</button>
       </div>
@@ -281,7 +283,8 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
                         <th style={{ width: 140 }}>NIN</th>
                         <th>Elemento / Secção</th>
                         <th>Alteração / Registo</th>
-                        <th style={{textAlign: 'right', width: 180}}>Ordem de Serviço/SIIE</th>
+                        {/* A COLUNA SÓ APARECE NOS PENDENTES */}
+                        {filtro === "PENDENTES" && <th style={{textAlign: 'right', width: 180}}>Ordem de Serviço/SIIE</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -289,7 +292,6 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
                         const user = [...elementos, ...dirigentes].find(e => e.uid === n.uidElemento);
                         const userNIN = user?.nin || extractNIN(user?.email) || "N/A";
                         const nomeSecao = secoesMap[n.secaoDocId]?.nome || n.secaoDocId || "Agrupamento";
-                        const fullDesc = `${formatarDataHoraSegundos(n.createdAt)} | ${userNIN} | ${n.elementoNome} | ${n.descricao}`;
                         
                         return (
                           <tr key={n.id} style={{ background: filtro === "PENDENTES" ? "rgba(23,154,171,.03)" : "transparent" }}>
@@ -301,12 +303,15 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
                             </td>
                             <td style={{ paddingTop: 16 }}>
                               <span className="az-pill" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--text)", padding: "6px 12px" }}>
-                                {fullDesc}
+                                {n.descricao}
                               </span>
                             </td>
-                            <td style={{textAlign: 'right', paddingTop: 16}}>
-                              {!n.resolvida && <button className="az-btn az-btn-primary" onClick={() => handleResolver(n.id)}>✅ Confirmar em OS/SIIE</button>}
-                            </td>
+                            {/* O BOTÃO SÓ APARECE NOS PENDENTES */}
+                            {filtro === "PENDENTES" && (
+                              <td style={{textAlign: 'right', paddingTop: 16}}>
+                                <button className="az-btn az-btn-primary" onClick={() => handleResolver(n.id)}>✅ Confirmar em OS/SIIE</button>
+                              </td>
+                            )}
                           </tr>
                         );
                       })}
@@ -322,7 +327,7 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
         <>
           <div className="az-card" style={{ background: "rgba(23,154,171,.03)" }}>
             <div className="az-card-inner">
-              <h3 className="az-h2" style={{fontSize: 18, marginBottom: 16}}>⚙️ Secretário do Agrupamento</h3>
+              <h3 className="az-h2" style={{fontSize: 18, marginBottom: 16}}>⚙️ Secretario de Agrupamento</h3>
                <div className="az-grid-2">
                   <div className="az-panel" style={{ color: "#fff", background: "rgba(0,0,0,0.3)", borderColor: "rgba(255,255,255,0.1)" }}>
                     <h4 style={{marginBottom: 8}}>🔄 Ativar / Desativar / Transferir</h4>
@@ -392,16 +397,16 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
 
           <div className="az-card" style={{ marginBottom: 24, borderColor: "rgba(236,131,50,.3)" }}>
             <div className="az-card-inner">
-              <h3 className="az-h2" style={{ margin: 0, fontSize: 20, color: "var(--brand-orange)" }}>Equipa de Animação (Dirigentes)</h3>
+              <h3 style={{ margin: 0, fontSize: 18, color: "var(--brand-orange)", borderBottom: '1px solid var(--stroke)', paddingBottom: 8, marginBottom: 12 }}>Equipa de Animação (Dirigentes)</h3>
               <div className="az-table-wrap">
                 <table className="az-table" style={{ fontSize: 13 }}>
-                  <thead><tr><th style={{ width: 120 }}>NIN</th><th>Nome</th><th>Cargo / Funções</th><th style={{ textAlign: "right" }}>Ações Secretaria</th></tr></thead>
+                  <thead><tr><th style={{ width: 120 }}>NIN</th><th>Nome</th><th>Cargo / Funções</th><th style={{ textAlign: "right" }}>Ações Secretario</th></tr></thead>
                   <tbody>
                     {dirigentes.map(dir => (
                       <tr key={dir.uid} style={{ opacity: dir.ativo === false ? 0.4 : 1 }}>
-                        <td style={{ fontFamily: "monospace" }}>{dir.nin || extractNIN(dir.email)}</td>
+                        <td style={{ fontFamily: "monospace", color: "var(--text)" }}>{dir.nin || extractNIN(dir.email)}</td>
                         <td style={{ fontWeight: 600 }}>{dir.nome} {dir.ativo === false && <span className="az-pill" style={{ background: "var(--danger)", fontSize: 10, border: 'none' }}>INATIVO</span>}</td>
-                        <td>{dir.funcoes?.join(", ").replace(/_/g, " ") || "-"}</td>
+                        <td>{dir.funcoes?.length > 0 ? dir.funcoes.join(", ").replace(/_/g, " ") : "-"}</td>
                         <td style={{ textAlign: "right" }}>
                           <button className="az-btn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => handleResetPassword(dir.uid, dir.nome)} disabled={resettingUid === dir.uid || dir.ativo === false}>{resettingUid === dir.uid ? "⏳" : "🔑 Reset Pass"}</button>
                         </td>
@@ -431,27 +436,38 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
               <div key={secId} className="az-card" style={{ marginBottom: 24 }}>
                 <div className="az-card-inner">
                   <h3 style={{ color: "var(--brand-teal)", fontSize: 18, borderBottom: '1px solid var(--stroke)', paddingBottom: 8, marginBottom: 12 }}>{secaoData.nome}</h3>
-                  <div className="az-grid" style={{ gap: 20 }}>
-                    {Object.entries(elementosPorSub).sort(([a], [b]) => a.localeCompare(b)).map(([subId, lista]) => (
-                      <div key={subId}>
-                        <h4 style={{ margin: "0 0 8px 0", color: "var(--text)", opacity: 0.9 }}>{subId === "sem_grupo" ? "⚠️ Sem Unidade" : `⛺ ${termoGrupo}: ${secaoData.subunidades[subId] || subId}`}</h4>
-                        <div className="az-table-wrap">
-                          <table className="az-table" style={{ fontSize: 13 }}>
-                            <thead><tr><th>NIN</th><th>Nome</th><th>Cargo</th><th>Etapa de Progresso</th></tr></thead>
-                            <tbody>
-                              {lista.map(el => (
-                                <tr key={el.uid}>
-                                  <td style={{ fontFamily: "monospace" }}>{el.nin || extractNIN(el.email)}</td>
-                                  <td style={{ fontWeight: 600 }}>{el.nome}</td>
-                                  <td>{el.isGuia ? "Guia" : el.isSubGuia ? "Sub-Guia" : "-"}</td>
-                                  <td>{nomeEtapa(el.etapaProgresso)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    ))}
+                  <div className="az-table-wrap">
+                    <table className="az-table" style={{ fontSize: 13 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: 120 }}>NIN</th>
+                          <th>Nome</th>
+                          <th>Cargo</th>
+                          <th>Etapa de Progresso</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(elementosPorSub).sort(([a], [b]) => a.localeCompare(b)).map(([subId, lista]) => (
+                          <Fragment key={subId}>
+                            {/* LINHA DE AGRUPAMENTO - BANDO/PATRULHA */}
+                            <tr style={{ background: "rgba(255,255,255,0.03)" }}>
+                              <td colSpan="4" style={{ padding: "8px 12px", fontWeight: 700, color: "var(--brand-teal)" }}>
+                                {subId === "sem_grupo" ? "⚠️ Elementos sem unidade" : `⛺ ${termoGrupo}: ${secaoData.subunidades[subId] || subId}`}
+                              </td>
+                            </tr>
+                            {/* ELEMENTOS DA SUBUNIDADE */}
+                            {lista.map(el => (
+                              <tr key={el.uid}>
+                                <td style={{ fontFamily: "monospace", color: "var(--text)" }}>{el.nin || extractNIN(el.email)}</td>
+                                <td style={{ fontWeight: 600 }}>{el.nome}</td>
+                                <td>{el.isGuia ? <span className="az-pill" style={{fontSize: 10, background: "rgba(236,131,50,.15)", color: "var(--brand-orange)", border: "none"}}>Guia</span> : el.isSubGuia ? <span className="az-pill" style={{fontSize: 10, background: "rgba(236,131,50,.1)", color: "var(--brand-orange)", border: "none"}}>Sub-Guia</span> : "-"}</td>
+                                <td>{nomeEtapa(el.etapaProgresso)}</td>
+                              </tr>
+                            ))}
+                          </Fragment>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               </div>

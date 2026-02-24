@@ -57,6 +57,9 @@ exports.resetUserPassword = onCall(async (request) => {
 // ============================================================================
 // 2. IMPORTAÇÃO DE UTILIZADORES
 // ============================================================================
+// ============================================================================
+// 2. IMPORTAÇÃO DE UTILIZADORES
+// ============================================================================
 exports.importUsersBatch = onCall(async (request) => {
   const { data, auth } = request;
   if (!auth) throw new HttpsError("unauthenticated", "Sem permissão.");
@@ -70,6 +73,8 @@ exports.importUsersBatch = onCall(async (request) => {
   }
 
   const results = { success: 0, errors: [] };
+  // Formata a data para a mensagem de OS
+  const dataOS = new Date().toLocaleString("pt-PT", { timeZone: "Europe/Lisbon" });
 
   for (const u of data.users) {
     const email = `${u.nin}@azimute.cne`;
@@ -94,13 +99,13 @@ exports.importUsersBatch = onCall(async (request) => {
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
 
-      // 🚨 GERA MENSAGEM PARA ORDEM DE SERVIÇO / SIIE
+      // 🚨 GERA A MENSAGEM AUTOMÁTICA DE IMPORTAÇÃO PARA O SIIE
       await db.collection("notificacoes").add({
         agrupamentoId: callerProfile.agrupamentoId,
         uidElemento: userRecord.uid,
         elementoNome: u.nome,
         secaoDocId: u.secaoFinal || "GERAL",
-        descricao: `Importado e Ativado!`, // A descrição base, o texto rico é gerado no frontend
+        descricao: `${dataOS} | ${u.nin} | ${u.nome} | Importado e Ativado!`,
         tipo: "ESTADO_CONTA",
         resolvida: false,
         createdAt: admin.firestore.FieldValue.serverTimestamp()
@@ -113,7 +118,6 @@ exports.importUsersBatch = onCall(async (request) => {
   }
   return results;
 });
-
 // ============================================================================
 // 3. ATIVAR / DESATIVAR UTILIZADOR
 // ============================================================================

@@ -215,8 +215,9 @@ export default function App() {
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px" }}>
         
         {!user ? (
-          <div className="az-login-container">
-            <div className="az-card">
+          // 🚨 FORÇADO A EMPILHAR EM COLUNA 🚨
+          <div className="az-login-container" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "85vh" }}>
+            <div className="az-card" style={{ width: "100%", maxWidth: 420 }}>
               <div className="az-card-inner">
                 <div style={{ textAlign: 'center', marginBottom: 24 }}>
                   <img src={azimuteLogo} alt="Logo" style={{ height: 70, borderRadius: 16, margin: "0 auto" }} />
@@ -237,10 +238,28 @@ export default function App() {
                 </form>
               </div>
             </div>
+
+            {/* 🚨 CRÉDITOS E COPYRIGHT - PÁGINA DE LOGIN 🚨 */}
+            <div style={{ 
+              marginTop: "32px", 
+              textAlign: "center", 
+              color: "rgba(255, 255, 255, 0.6)", 
+              display: "flex", 
+              flexDirection: "column", 
+              gap: "6px" 
+            }}>
+              <div style={{ fontSize: "12px", fontWeight: 600 }}>
+                © 2026 Azimute - Todos os direitos reservados.
+              </div>
+              <div style={{ fontSize: "10px", fontStyle: "italic", opacity: 0.8 }}>
+                Desenvolvido, desenhado e mantido por João Taveira (Agrupamento 1104 Paranhos)
+              </div>
+            </div>
+
           </div>
         ) : profile?.forcarMudancaPassword ? (
-          <div className="az-login-container" style={{ marginTop: "10vh" }}>
-            <div className="az-card" style={{ borderColor: "var(--brand-orange)" }}>
+          <div className="az-login-container" style={{ marginTop: "10vh", display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <div className="az-card" style={{ borderColor: "var(--brand-orange)", width: "100%", maxWidth: 420 }}>
               <div className="az-card-inner">
                 <div style={{ textAlign: "center", marginBottom: 20 }}>
                   <div style={{ fontSize: 40 }}>⚠️</div>
@@ -299,7 +318,7 @@ export default function App() {
                   <button className={`az-tab ${view === "cu_objetivos" ? "active" : ""}`} onClick={() => setView("cu_objetivos")}>Objetivos Educativos</button>
                 </>
               )}
-              {flags.isSA && <button className={`az-tab ${view === "secretario_agrupamento" ? "active" : ""}`} onClick={() => setView("secretario_agrupamento")}>Secretaria</button>}
+              {flags.isSA && <button className={`az-tab ${view === "secretario_agrupamento" ? "active" : ""}`} onClick={() => setView("secretario_agrupamento")}>Secretário</button>}
               {flags.isCA && <button className={`az-tab ${view === "chefe_agrupamento" ? "active" : ""}`} onClick={() => setView("chefe_agrupamento")}>Adultos</button>}
             </nav>
 
