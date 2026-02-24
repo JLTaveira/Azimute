@@ -4,66 +4,167 @@
  * 2026-02-23 - Joao Taveira (jltaveira@gmail.com)
  */
 
-const functions = require("firebase-functions");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
-admin.initializeApp();
 
-exports.resetUserPassword = functions.https.onCall(async (data, context) => {
-  // 1. Verificar se quem chama a função está logado
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Precisas de ter sessão iniciada.");
-  }
+// Inicializa o Admin SDK
+if (admin.apps.length === 0) {
+  admin.initializeApp();
+}
 
-  const targetUid = data.uid;
-  if (!targetUid) {
-    throw new functions.https.HttpsError("invalid-argument", "Falta o UID do alvo.");
-  }
+// Define a região europe-west1 para TODAS as funções de forma global
+setGlobalOptions({ region: "europe-west1" });
 
-  const callerUid = context.auth.uid;
+// ============================================================================
+// 1. RESET DA PASSWORD
+// ============================================================================
+exports.resetUserPassword = onCall(async (request) => {
+  const { data, auth } = request;
+  if (!auth) throw new HttpsError("unauthenticated", "Sessão expirada.");
+
   const db = admin.firestore();
+  const targetUid = data.uid;
 
-  // 2. Ir buscar os perfis (Quem pede vs Quem sofre o reset)
-  const callerSnap = await db.collection("users").doc(callerUid).get();
-  const targetSnap = await db.collection("users").doc(targetUid).get();
-
-  if (!callerSnap.exists || !targetSnap.exists) {
-    throw new functions.https.HttpsError("not-found", "Perfil não encontrado.");
-  }
-
-  const callerProfile = callerSnap.data();
-  const targetProfile = targetSnap.data();
-
-  // 3. Verificar Permissões e Regras de Negócio
-  const callerFuncoes = callerProfile.funcoes || [];
-  const isSA = callerFuncoes.includes("SECRETARIO_AGRUPAMENTO");
-  const isCU = callerFuncoes.includes("CHEFE_UNIDADE");
-
-  if (targetProfile.tipo === "DIRIGENTE") {
-    if (!isSA || callerProfile.agrupamentoId !== targetProfile.agrupamentoId) {
-      throw new functions.https.HttpsError("permission-denied", "Apenas o Secretário pode fazer reset a Dirigentes.");
-    }
-  } else if (targetProfile.tipo === "ELEMENTO") {
-    if (!isCU || callerProfile.secaoDocId !== targetProfile.secaoDocId) {
-      throw new functions.https.HttpsError("permission-denied", "Apenas o Chefe de Unidade pode fazer reset aos seus elementos.");
-    }
-  }
-
-  // 4. Executar o Reset (Password predefinida e Forçar Mudança)
-  const defaultPassword = "Azimute2026"; // A password que vão usar para entrar a 1ª vez após o reset
-  
   try {
-    await admin.auth().updateUser(targetUid, {
-      password: defaultPassword
-    });
+    const callerSnap = await db.collection("users").doc(auth.uid).get();
+    const targetSnap = await db.collection("users").doc(targetUid).get();
+    
+    if (!targetSnap.exists) throw new HttpsError("not-found", "Utilizador não encontrado.");
 
+    const callerProfile = callerSnap.data();
+    const targetProfile = targetSnap.data();
+    const callerFuncoes = callerProfile.funcoes || [];
+
+    const isSA = callerFuncoes.includes("SECRETARIO_AGRUPAMENTO");
+    
+    if (targetProfile.tipo === "DIRIGENTE" && !isSA) {
+      throw new HttpsError("permission-denied", "Sem permissão.");
+    }
+
+    await admin.auth().updateUser(targetUid, { password: "Azimute2026" });
     await db.collection("users").doc(targetUid).update({
-      forcarMudancaPassword: true, // A flag mágica que tranca a app
+      forcarMudancaPassword: true,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    return { message: "Sucesso" };
+    return { success: true };
   } catch (error) {
-    console.error("Erro ao fazer reset:", error);
-    throw new functions.https.HttpsError("internal", "Erro interno no Firebase.");
+    throw new HttpsError("internal", error.message);
+  }
+});
+
+// ============================================================================
+// 2. IMPORTAÇÃO DE UTILIZADORES
+// ============================================================================
+exports.importUsersBatch = onCall(async (request) => {
+  const { data, auth } = request;
+  if (!auth) throw new HttpsError("unauthenticated", "Sem permissão.");
+
+  const db = admin.firestore();
+  const callerSnap = await db.collection("users").doc(auth.uid).get();
+  const callerProfile = callerSnap.data();
+
+  if (!callerProfile.funcoes?.includes("SECRETARIO_AGRUPAMENTO")) {
+    throw new HttpsError("permission-denied", "Apenas Secretaria.");
+  }
+
+  const results = { success: 0, errors: [] };
+
+  for (const u of data.users) {
+    const email = `${u.nin}@azimute.cne`;
+    try {
+      const userRecord = await admin.auth().createUser({
+        email: email,
+        password: "Azimute#2026",
+        displayName: u.nome,
+      });
+
+      await db.collection("users").doc(userRecord.uid).set({
+        nome: u.nome,
+        email: email,
+        nin: String(u.nin),
+        agrupamentoId: callerProfile.agrupamentoId,
+        secaoDocId: u.secaoFinal || null,
+        tipo: u.tipoFinal || "ELEMENTO",
+        funcoes: u.funcoesTratadas || [],
+        ativo: true,
+        forcarMudancaPassword: true,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      // 🚨 GERA MENSAGEM PARA ORDEM DE SERVIÇO / SIIE
+      await db.collection("notificacoes").add({
+        agrupamentoId: callerProfile.agrupamentoId,
+        uidElemento: userRecord.uid,
+        elementoNome: u.nome,
+        secaoDocId: u.secaoFinal || "GERAL",
+        descricao: `Importado e Ativado!`, // A descrição base, o texto rico é gerado no frontend
+        tipo: "ESTADO_CONTA",
+        resolvida: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      results.success++;
+    } catch (err) {
+      results.errors.push({ nin: u.nin, error: err.message });
+    }
+  }
+  return results;
+});
+
+// ============================================================================
+// 3. ATIVAR / DESATIVAR UTILIZADOR
+// ============================================================================
+exports.toggleUserStatus = onCall(async (request) => {
+  const { data, auth } = request;
+  if (!auth) throw new HttpsError("unauthenticated", "Sessão expirada.");
+
+  const db = admin.firestore();
+  const { uid, ativo } = data;
+
+  try {
+    const callerSnap = await db.collection("users").doc(auth.uid).get();
+    const caller = callerSnap.data();
+    
+    // Verificação de segurança (Secretaria ou Chefia)
+    if (!caller.funcoes?.includes("SECRETARIO_AGRUPAMENTO") && !caller.funcoes?.includes("CHEFE_AGRUPAMENTO")) {
+      throw new HttpsError("permission-denied", "Apenas a Secretaria tem permissão.");
+    }
+
+    const targetRef = db.collection("users").doc(uid);
+    const targetSnap = await targetRef.get();
+    const targetData = targetSnap.data();
+
+    let updateData = { 
+      ativo: ativo,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    // LÓGICA DE TRANSFERÊNCIA: Se ativar e o agrupamento for diferente
+    if (ativo === true && targetData.agrupamentoId !== caller.agrupamentoId) {
+      updateData = {
+        ...updateData,
+        agrupamentoId: caller.agrupamentoId, // Assume o novo agrupamento
+        // Limpeza pedagógica
+        etapaProgresso: null,
+        funcoes: [],
+        patrulhaId: null,
+        secaoDocId: null,
+        isGuia: false,
+        isSubGuia: false,
+        tipo: "ELEMENTO" // Reset por defeito para ser reatribuído
+      };
+    }
+
+    await targetRef.update(updateData);
+
+    // Bloqueia/Desbloqueia Login
+    await admin.auth().updateUser(uid, { disabled: !ativo });
+
+    return { success: true };
+  } catch (error) {
+    throw new HttpsError("internal", error.message);
   }
 });

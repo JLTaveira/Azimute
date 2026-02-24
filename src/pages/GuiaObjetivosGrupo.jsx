@@ -5,185 +5,217 @@ src/pages/GuiaObjetivosGrupo.jsx
  2026-02-20 - Joao Taveira (jltaveira@gmail.com) */
 
 
-/* GUIAOBJETIVOSGRUPO.jsx - Versão Optimizada
-   O ecrã onde o Guia valida as propostas da sua Patrulha
-   2026-02-22 - Azimute Helper */
-
 import { useEffect, useState, useMemo } from "react";
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 
-const AREAS_COLORS = {
-  FISICO: "az-area--fisico",
-  AFETIVO: "az-area--afetivo",
-  CARACTER: "az-area--caracter",
-  ESPIRITUAL: "az-area--espiritual",
-  INTELECTUAL: "az-area--intelectual",
-  SOCIAL: "az-area--social"
+const AREA_META = {
+  FISICO: { nome: "Físico", bg: "#16a34a", text: "#ffffff" },
+  AFETIVO: { nome: "Afetivo", bg: "#dc2626", text: "#ffffff" },
+  CARACTER: { nome: "Caráter", bg: "#2563eb", text: "#ffffff" },
+  ESPIRITUAL: { nome: "Espiritual", bg: "#9333ea", text: "#ffffff" },
+  INTELECTUAL: { nome: "Intelectual", bg: "#ea580c", text: "#ffffff" },
+  SOCIAL: { nome: "Social", bg: "#eab308", text: "#000000" },
 };
 
+// Funções Auxiliares para formatação
+function areaToKey(a) {
+  const k = String(a || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  if (k === "CARATER") return "CARACTER";
+  return AREA_META[k] ? k : "OUTRA";
+}
+
+function secaoFromSecaoDocId(secaoDocId) {
+  const s = String(secaoDocId || "").toLowerCase();
+  if (s.includes("alcateia")) return "LOBITOS";
+  if (s.includes("expedicao")) return "EXPLORADORES";
+  if (s.includes("comunidade")) return "PIONEIROS";
+  if (s.includes("cla")) return "CAMINHEIROS";
+  return null;
+}
+
+function extrairCodigoFromOid(oid) {
+  const m = String(oid || "").match(/_([A-Z]\d+)$/);
+  return m ? m[1] : "";
+}
+
+function descricaoDoCatalogo(o) {
+  const desc = String(o?.descricao || "").trim();
+  if (desc) return desc;
+  const oe = String(o?.oportunidadeEducativa || "").trim();
+  const m = oe.match(/^[A-Z]\d+\s*-\s*(.*)$/);
+  return m ? m[1] : oe;
+}
+
 export default function GuiaObjetivosGrupo({ profile }) {
-  const [pendentes, setPendentes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
+  const [elementos, setElementos] = useState([]);
+  const [objetivos, setObjetivos] = useState([]);
+  const [catalogo, setCatalogo] = useState([]);
+
+  const secaoBase = secaoFromSecaoDocId(profile?.secaoDocId);
 
   useEffect(() => {
-    if (!profile?.patrulhaId || !profile?.secaoDocId) {
-      setLoading(false);
-      setErro("Não tens uma subunidade atribuída no teu perfil.");
-      return;
-    }
-    fetchPropostasDaPatrulha();
-  }, [profile]);
+    if (!profile?.patrulhaId || !profile?.secaoDocId) return;
 
-  async function fetchPropostasDaPatrulha() {
-    setLoading(true);
-    setErro("");
-    try {
-      // 1. Obter todos os elementos que pertencem à mesma patrulha
-      const qUsers = query(
-        collection(db, "users"),
-        where("agrupamentoId", "==", profile.agrupamentoId),
-        where("secaoDocId", "==", profile.secaoDocId),
-        where("patrulhaId", "==", profile.patrulhaId)
-      );
-      
-      const snapUsers = await getDocs(qUsers);
-      const elementosPatrulha = [];
-      
-      snapUsers.forEach(d => {
-        // Excluímos o próprio Guia, pois os objetivos dele vão direto para o Chefe
-        if (d.id !== profile.uid) {
-          elementosPatrulha.push({ uid: d.id, nome: d.data().nome, totem: d.data().totem });
-        }
-      });
+    async function fetchData() {
+      setLoading(true); setErro("");
+      try {
+        // 1. Vai buscar o Catálogo da Secção para sabermos os Títulos e Cores
+        const qCat = query(collection(db, "catalogoObjetivos"), where("secao", "==", secaoBase));
+        const snapCat = await getDocs(qCat);
+        const cat = snapCat.docs.map(d => {
+          const data = d.data();
+          return { 
+            id: d.id, 
+            _areaKey: areaToKey(data.areaDesenvolvimento || data.area), 
+            _trilho: data.trilhoEducativo || data.trilho || "Geral", 
+            _codigo: data.codigo || extrairCodigoFromOid(d.id), 
+            _titulo: descricaoDoCatalogo(data), 
+            ...data 
+          };
+        });
+        setCatalogo(cat);
 
-      // 2. Procurar em paralelo os objetivos no estado "ESCOLHA" de cada elemento
-      const objetivosPendentes = [];
-      
-      await Promise.all(
-        elementosPatrulha.map(async (elemento) => {
-          const qObjs = query(
-            collection(db, `users/${elemento.uid}/objetivos`),
-            where("estado", "==", "ESCOLHA")
-          );
-          const snapObjs = await getDocs(qObjs);
-          
-          snapObjs.forEach(objSnap => {
-            const data = objSnap.data();
-            objetivosPendentes.push({
-              uid: elemento.uid,
-              docId: objSnap.id,
-              elementoNome: elemento.nome,
-              elementoTotem: elemento.totem,
-              ...data
+        // 2. Vai buscar os Elementos da mesma Patrulha/Bando
+        const qUsers = query(
+          collection(db, "users"), 
+          where("agrupamentoId", "==", profile.agrupamentoId), 
+          where("secaoDocId", "==", profile.secaoDocId),
+          where("patrulhaId", "==", profile.patrulhaId),
+          where("tipo", "==", "ELEMENTO")
+        );
+        const snapUsers = await getDocs(qUsers);
+        const listaElementos = [];
+        snapUsers.forEach(d => {
+          // 🚨 FILTRO AQUI: Excluímos o próprio Guia E os elementos inativos
+          if (d.id !== profile.uid && d.data().ativo !== false) {
+            listaElementos.push({ uid: d.id, ...d.data() });
+          }
+        });
+        setElementos(listaElementos.sort((a,b) => String(a.nome).localeCompare(String(b.nome))));
+
+        // 3. Vai buscar apenas os Objetivos que estão em "ESCOLHA" (A aguardar validação)
+        const todosObjetivos = [];
+        await Promise.all(
+          listaElementos.map(async (elemento) => {
+            const snapObjs = await getDocs(query(collection(db, `users/${elemento.uid}/objetivos`), where("estado", "==", "ESCOLHA")));
+            snapObjs.forEach(objSnap => {
+              todosObjetivos.push({ uid: elemento.uid, docId: objSnap.id, ...objSnap.data() });
             });
-          });
-        })
-      );
+          })
+        );
+        setObjetivos(todosObjetivos);
 
-      setPendentes(objetivosPendentes);
-    } catch (err) {
-      console.error("Erro ao carregar propostas da patrulha:", err);
-      setErro("Ocorreu um erro ao carregar os dados. Verifica as tuas permissões.");
-    } finally {
-      setLoading(false);
+      } catch (err) {
+        setErro("Erro ao carregar os dados da patrulha.");
+      } finally {
+        setLoading(false);
+      }
     }
-  }
+    fetchData();
+  }, [profile, secaoBase]);
 
-  // Ação de Validação do Guia
+  // Junta os dados do utilizador com os dados bonitos do Catálogo
+  const objetivosEnriquecidos = useMemo(() => {
+    return objetivos.map(obj => {
+      const catItem = catalogo.find(c => c.id === obj.docId) || {};
+      return { ...obj, ...catItem };
+    });
+  }, [objetivos, catalogo]);
+
+  // Função para o Guia clicar em "Validar"
   async function handleValidar(uid, docId, titulo) {
-    if (!window.confirm(`Queres validar o objetivo "${titulo}"? \nIsto enviará a proposta para a aprovação final do Chefe de Unidade.`)) {
-      return;
-    }
+    if (!window.confirm(`Queres validar o objetivo "${titulo || 'Desconhecido'}"?\nIsto enviará a proposta para a aprovação final da Equipa de Animação.`)) return;
 
     try {
       const ref = doc(db, `users/${uid}/objetivos/${docId}`);
       await updateDoc(ref, {
-        estado: "VALIDADO", // Muda o estado para que saia da lista do Guia e vá para o Chefe
+        estado: "VALIDADO",
+        validadoPor: profile.uid,
         validadoAt: serverTimestamp(),
-        validadoPorUid: profile.uid // Guarda quem foi o Guia que validou
+        updatedAt: serverTimestamp()
       });
 
-      // Remove da lista atual visualmente sem precisar de recarregar a base de dados
-      setPendentes(prev => prev.filter(o => !(o.uid === uid && o.docId === docId)));
-    } catch (err) {
-      alert("Erro ao validar: " + err.message);
+      // Remove imediatamente da lista visual
+      setObjetivos(prev => prev.filter(o => !(o.uid === uid && o.docId === docId)));
+    } catch (error) {
+      alert("Erro ao validar objetivo. Verifica as tuas ligações ou permissões.");
     }
   }
 
-  // Agrupar visualmente por Elemento para facilitar a leitura no Conselho de Guias
-  const pendentesPorElemento = useMemo(() => {
-    const mapa = {};
-    pendentes.forEach(obj => {
-      if (!mapa[obj.uid]) {
-        mapa[obj.uid] = {
-          nome: obj.elementoTotem || obj.elementoNome,
-          objetivos: []
-        };
-      }
-      mapa[obj.uid].objetivos.push(obj);
-    });
-    return mapa;
-  }, [pendentes]);
-
-  if (loading) return <div className="az-muted">A reunir os dados da tua unidade...</div>;
+  if (loading) return <div className="az-loading-screen"><div className="az-logo-pulse">⏳</div></div>;
   if (erro) return <div className="az-alert az-alert--error">{erro}</div>;
 
-  const arrayElementos = Object.values(pendentesPorElemento);
+  // Agrupa os objetivos por Elemento para a UI ficar arrumada
+  const grouped = {};
+  objetivosEnriquecidos.forEach(obj => {
+    if (!grouped[obj.uid]) {
+      const el = elementos.find(e => e.uid === obj.uid);
+      grouped[obj.uid] = { nome: el?.nome || "Elemento Desconhecido", objs: [] };
+    }
+    grouped[obj.uid].objs.push(obj);
+  });
 
   return (
     <div className="az-grid" style={{ gap: 24 }}>
-      <div>
-        <h2 className="az-h2">⚜️ Conselho de Guias Digital</h2>
-        <p className="az-muted az-small" style={{ marginTop: 4 }}>
-          Valida os objetivos que os teus elementos propuseram ou realizaram. Ao aprovares, eles seguirão para o Chefe de Unidade.
-        </p>
-      </div>
-
-      {arrayElementos.length === 0 ? (
-        <div className="az-panel" style={{ textAlign: "center", padding: "40px 20px" }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>🏕️</div>
-          <b style={{ fontSize: 16 }}>Tudo em dia!</b>
-          <p className="az-panel-muted" style={{ margin: "8px 0 0" }}>
-            Não existem objetivos pendentes de validação na tua patrulha/equipa.
+      <div className="az-card">
+        <div className="az-card-inner">
+          <h2 className="az-h2" style={{ display: "flex", alignItems: "center", gap: 10 }}>⚜️ Conselho de Guias Digital</h2>
+          <p className="az-muted az-small" style={{ marginTop: 4 }}>
+            Valida os objetivos que os teus elementos propuseram. Ao aprovares, eles seguirão para o Chefe de Unidade.
           </p>
         </div>
-      ) : (
-        <div className="az-grid" style={{ gap: 24 }}>
-          {arrayElementos.map((elemento, idx) => (
-            <div key={idx} className="az-card">
-              <div className="az-card-inner">
-                <h3 style={{ margin: "0 0 16px 0", borderBottom: "1px solid var(--stroke)", paddingBottom: 8 }}>
-                  👤 {elemento.nome}
-                </h3>
-                
-                <div className="az-grid" style={{ gap: 12 }}>
-                  {elemento.objetivos.map(obj => (
-                    <div key={obj.docId} className="az-panel az-panel-sm" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                      
-                      <span className={`az-area-badge ${AREAS_COLORS[obj.area] || ""}`}>
-                        {obj.area}
-                      </span>
-                      
-                      <div style={{ flex: 1, minWidth: 200 }}>
-                        <div style={{ fontWeight: 700, color: "var(--panel-text)" }}>{obj.titulo}</div>
-                        <div className="az-small muted">Proposto a: {obj.propostoAt?.toDate().toLocaleDateString('pt-PT') || "Recentemente"}</div>
-                      </div>
+      </div>
 
+      {Object.keys(grouped).length === 0 ? (
+        <div className="az-panel" style={{ textAlign: "center", padding: "40px" }}>
+          <div style={{ fontSize: 40, opacity: 0.5 }}>✅</div>
+          <p className="az-muted" style={{ marginTop: 12 }}>Tudo em dia! Não há objetivos propostos na tua unidade a aguardar validação.</p>
+        </div>
+      ) : (
+        Object.values(grouped).map(group => (
+          <div key={group.nome} className="az-card">
+            <div className="az-card-inner">
+              <h3 style={{ margin: "0 0 16px 0", color: "var(--brand-teal)", display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid var(--stroke)", paddingBottom: 8 }}>
+                👤 {group.nome}
+              </h3>
+              
+              <div className="az-grid" style={{ gap: 12 }}>
+                {group.objs.map(obj => (
+                  <div key={obj.docId} className="az-panel az-panel-sm" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                    
+                    {/* Badge da Área (Colorido) */}
+                    <span className="az-area-badge" style={{ background: AREA_META[obj._areaKey]?.bg || "#333", color: AREA_META[obj._areaKey]?.text || "#fff" }}>
+                      {obj._codigo || "?"}
+                    </span>
+                    
+                    {/* Título e Trilho */}
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <div style={{ fontWeight: 700, color: "var(--panel-text)" }}>{obj._titulo || "Objetivo sem título"}</div>
+                      <div className="az-small muted">
+                        Trilho: {obj._trilho || "Geral"} • Área: {AREA_META[obj._areaKey]?.nome || "Outra"}
+                      </div>
+                    </div>
+                    
+                    {/* Botão Validar */}
+                    <div>
                       <button 
                         className="az-btn az-btn-primary" 
-                        onClick={() => handleValidar(obj.uid, obj.docId, obj.titulo)}
+                        style={{ padding: "8px 16px", fontWeight: 700 }}
+                        onClick={() => handleValidar(obj.uid, obj.docId, obj._titulo)}
                       >
                         ✅ Validar
                       </button>
                     </div>
-                  ))}
-                </div>
+
+                  </div>
+                ))}
               </div>
             </div>
-          ))}
-        </div>
+          </div>
+        ))
       )}
     </div>
   );

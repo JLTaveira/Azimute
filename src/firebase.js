@@ -5,7 +5,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
-import { getFunctions } from "firebase/functions";
+import { getFunctions } from "firebase/functions"; // 🚨 Importante para as Cloud Functions
 
 const firebaseConfig = {
   apiKey: "AIzaSyBxuRL9jqitNP4AMhGT5jTLvv-zyRMbksg",
@@ -16,8 +16,16 @@ const firebaseConfig = {
   appId: "1:905979775988:web:991c25ac4150f136a587a1"
 };
 
+// Inicializa o Firebase
 const app = initializeApp(firebaseConfig);
 
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const functions = getFunctions(app, "us-central1");
+// Inicializa os serviços
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// Inicializa as Functions com a região correta (Portugal usa europe-west1)
+// Se não definires a região aqui, ele assume 'us-central1' e vai dar erro ao chamar
+const functions = getFunctions(app, "europe-west1"); 
+
+// 🚨 EXPORTAÇÃO ÚNICA E LIMPA NO FINAL
+export { auth, db, functions };

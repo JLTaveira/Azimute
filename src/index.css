@@ -27,7 +27,7 @@ src/index.css
   --radius-sm: 12px;
   --focus: 0 0 0 3px rgba(23, 154, 171, 0.35);
 
-/* Cores das Áreas de Desenvolvimento (CNE Oficial) */
+  /* Cores das Áreas de Desenvolvimento (CNE Oficial) */
   --area-fisico: #16a34a;      /* Verde */
   --area-afetivo: #dc2626;     /* Vermelho */
   --area-caracter: #2563eb;    /* Azul */
@@ -134,17 +134,26 @@ img { max-width: 100%; display: block; }
   background: rgba(0,0,0,0.4);
 }
 
-.az-btn {
+/* MARRETADA FINAL NOS BOTÕES E LINKS */
+.az-btn,
+a.az-btn,
+a.az-btn:link,
+a.az-btn:visited,
+a.az-btn:hover,
+a.az-btn:active {
   appearance: none;
   border: 1px solid var(--stroke);
   background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
+  color: #ffffff !important; /* Força branco em TUDO */
+  text-decoration: none !important; /* Remove sublinhados de links */
   border-radius: var(--radius-sm);
   padding: 12px 16px;
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.06s ease, background 0.12s ease;
   font-family: inherit;
+  display: inline-block; /* Garante que os links têm tamanho de botão */
+  text-align: center;
 }
 
 .az-btn:hover:not(:disabled) { 
@@ -160,17 +169,20 @@ img { max-width: 100%; display: block; }
   cursor: not-allowed; 
 }
 
-.az-btn-primary {
+.az-btn-primary,
+a.az-btn-primary {
   border-color: rgba(81, 160, 74, 0.45);
   background: linear-gradient(180deg, rgba(81, 160, 74, 0.35), rgba(81, 160, 74, 0.22));
 }
 
-.az-btn-primary:hover:not(:disabled) {
+.az-btn-primary:hover:not(:disabled),
+a.az-btn-primary:hover:not(:disabled) {
   border-color: rgba(81, 160, 74, 0.70);
   background: linear-gradient(180deg, rgba(81, 160, 74, 0.45), rgba(81, 160, 74, 0.28));
 }
 
-.az-btn-teal {
+.az-btn-teal,
+a.az-btn-teal {
   border-color: rgba(23, 154, 171, 0.45);
   background: linear-gradient(180deg, rgba(23, 154, 171, 0.30), rgba(23, 154, 171, 0.18));
 }

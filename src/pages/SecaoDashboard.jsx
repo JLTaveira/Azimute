@@ -105,9 +105,17 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
           let q = null;
           if (souDirigente || souChefeUnidade) q = query(collection(db, "users"), where("agrupamentoId", "==", agrupamentoId), where("secaoDocId", "==", secaoDocId));
           else if ((souGuia || souSubGuia) && profile?.patrulhaId) q = query(collection(db, "users"), where("agrupamentoId", "==", agrupamentoId), where("secaoDocId", "==", secaoDocId), where("patrulhaId", "==", profile.patrulhaId));
+          
           if (q) {
             const usersSnap = await getDocs(q);
-            setMembros(usersSnap.docs.map((d) => ({ uid: d.id, ...d.data() })));
+            const membrosAtivos = [];
+            usersSnap.forEach((d) => {
+              // 🚨 FILTRO AQUI
+              if (d.data().ativo !== false) {
+                membrosAtivos.push({ uid: d.id, ...d.data() });
+              }
+            });
+            setMembros(membrosAtivos);
           }
         } catch (e) { setErrMembros(e.message); }
       }
@@ -182,7 +190,7 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
         <div className="az-card-inner az-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <h1 className="az-h1" style={{ fontSize: 26, marginBottom: 6 }}>Boa caça, {profile?.totem || profile?.nome || "Escuteiro"}! 🏕️</h1>
-            <p className="az-muted" style={{ margin: 0, fontSize: 15 }}>Dashboard da <b>{secao?.nome || secaoDocId}</b> • Agrupamento {agrupamentoId}</p>
+            <p className="az-muted" style={{ margin: 0, fontSize: 15 }}>Dashboard <b>{secao?.nome || secaoDocId}</b> • Agrupamento {agrupamentoId.replace(/_/g, ' ')}</p>
             <div className="az-row" style={{ marginTop: 14, gap: 10 }}>
               {souDirigente ? (
                 <span className="az-pill" style={{ display: "flex", alignItems: "center", gap: 6 }}>

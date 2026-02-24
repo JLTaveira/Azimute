@@ -7,7 +7,7 @@ import { useEffect, useState, useMemo } from "react";
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 
-// IMPORT DA IMAGEM CA AQUI!
+// IMPORT DA IMAGEM CA
 import caImg from "../assets/ca.png";
 
 const AREAS_CNE = [
@@ -20,7 +20,8 @@ const AREAS_CNE = [
 ];
 
 const SECOES_ORDEM = ["LOBITOS", "EXPLORADORES", "PIONEIROS", "CAMINHEIROS"];
-const TODAS_FUNCOES = ["CHEFE_AGRUPAMENTO", "SECRETARIO_AGRUPAMENTO", "CHEFE_UNIDADE", "CHEFE_UNIDADE_ADJUNTO", "INSTRUTOR_SECAO"];
+// ADICIONADA A FUNÇÃO "AUXILIAR" À LISTA
+const TODAS_FUNCOES = ["CHEFE_AGRUPAMENTO", "SECRETARIO_AGRUPAMENTO", "CHEFE_UNIDADE", "CHEFE_UNIDADE_ADJUNTO", "INSTRUTOR_SECAO", "AUXILIAR"];
 
 export default function ChefeAgrupamentoDashboard({ profile }) {
   const [tabAtual, setTabAtual] = useState("RADAR"); 
@@ -82,6 +83,22 @@ export default function ChefeAgrupamentoDashboard({ profile }) {
 
   function iniciarEdicao(dir) {
     setEditandoUid(dir.uid); setEditTotem(dir.totem || ""); setEditSecao(dir.secaoDocId || ""); setEditFuncoes(dir.funcoes || []);
+  }
+
+  // NOVA LÓGICA DE SELEÇÃO EXCLUSIVA PARA O "AUXILIAR"
+  function handleFuncaoToggle(funcao, isChecked) {
+    if (isChecked) {
+      if (funcao === "AUXILIAR") {
+        // Se selecionou Auxiliar, apaga todas as outras e fica só com esta
+        setEditFuncoes(["AUXILIAR"]);
+      } else {
+        // Se selecionou outra qualquer (ex: Chefe), garante que tira o Auxiliar
+        setEditFuncoes(prev => [...prev.filter(f => f !== "AUXILIAR"), funcao]);
+      }
+    } else {
+      // Remover função
+      setEditFuncoes(prev => prev.filter(f => f !== funcao));
+    }
   }
 
   async function guardarEdicao(uid) {
@@ -189,14 +206,27 @@ export default function ChefeAgrupamentoDashboard({ profile }) {
                             </div>
                             <div className="az-form-group">
                               <label>Cargos & Funções</label>
-                              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10, background: "rgba(0,0,0,0.2)", padding: 12, borderRadius: 8, border: "1px solid var(--stroke)" }}>
+                              
+                              {/* MELHORIA VISUAL NA CAIXA DAS FUNÇÕES */}
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10, background: "rgba(0,0,0,0.4)", padding: 12, borderRadius: 8, border: "1px solid var(--stroke)" }}>
                                 {TODAS_FUNCOES.map(f => (
                                   <label key={f} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "4px 0" }}>
-                                    <input type="checkbox" checked={editFuncoes.includes(f)} onChange={(e) => { if (e.target.checked) setEditFuncoes([...editFuncoes, f]); else setEditFuncoes(editFuncoes.filter(x => x !== f)); }} style={{ accentColor: "var(--brand-teal)", transform: "scale(1.2)" }} />
-                                    <span style={{ fontSize: 13, color: "var(--panel-text)", fontWeight: editFuncoes.includes(f) ? 800 : 500 }}>{f.replace(/_/g, " ")}</span>
+                                    <input 
+                                      type="checkbox" 
+                                      checked={editFuncoes.includes(f)} 
+                                      onChange={(e) => handleFuncaoToggle(f, e.target.checked)} 
+                                      style={{ accentColor: "var(--brand-teal)", transform: "scale(1.2)" }} 
+                                    />
+                                    
+                                    {/* COR DO TEXTO FORÇADA A BRANCO E VERIFICAÇÃO SE É AUXILIAR */}
+                                    <span style={{ fontSize: 13, color: "#ffffff", fontWeight: editFuncoes.includes(f) ? 800 : 500 }}>
+                                      {f.replace(/_/g, " ")}
+                                      {f === "AUXILIAR" && <span style={{ marginLeft: 8, fontSize: 10, background: "var(--danger)", padding: "2px 6px", borderRadius: 4, fontWeight: 700 }}>Bloqueia Login</span>}
+                                    </span>
                                   </label>
                                 ))}
                               </div>
+
                             </div>
                           </div>
                           <div style={{ marginTop: 20, display: "flex", gap: 12, justifyContent: "flex-end", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 16 }}>
@@ -209,7 +239,17 @@ export default function ChefeAgrupamentoDashboard({ profile }) {
                       <tr key={dir.uid}>
                         <td style={{ paddingTop: 14 }}><div style={{ fontWeight: 700, color: "var(--text)" }}>{dir.nome}</div><div className="az-small" style={{ color: "var(--brand-orange)" }}>{dir.totem || "Sem Tótem"}</div></td>
                         <td style={{ paddingTop: 14 }}><span className="az-pill" style={{ background: "rgba(255,255,255,0.08)" }}>{dir.secaoDocId || "Agrupamento"}</span></td>
-                        <td style={{ paddingTop: 14 }}>{dir.funcoes?.length > 0 ? (<div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{dir.funcoes.map(f => (<span key={f} className="az-pill" style={{ fontSize: 10, background: "rgba(23,154,171,.15)", color: "var(--brand-teal)", border: "none" }}>{f.replace(/_/g, " ")}</span>))}</div>) : (<span className="az-muted az-small">-</span>)}</td>
+                        <td style={{ paddingTop: 14 }}>
+                          {dir.funcoes?.length > 0 ? (
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              {dir.funcoes.map(f => (
+                                <span key={f} className="az-pill" style={{ fontSize: 10, background: f === "AUXILIAR" ? "rgba(220,38,38,.15)" : "rgba(23,154,171,.15)", color: f === "AUXILIAR" ? "var(--danger)" : "var(--brand-teal)", border: "none" }}>
+                                  {f.replace(/_/g, " ")}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (<span className="az-muted az-small">-</span>)}
+                        </td>
                         <td style={{ textAlign: "right", paddingTop: 14 }}><button className="az-btn" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => iniciarEdicao(dir)}>✏️ Editar</button></td>
                       </tr>
                     )

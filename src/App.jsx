@@ -51,7 +51,6 @@ export default function App() {
   const [err, setErr] = useState("");
   const [view, setView] = useState("dashboard");
 
-  // --- Estados para Mudança de Password ---
   const [showPwdModal, setShowPwdModal] = useState(false);
   const [pwdCurrent, setPwdCurrent] = useState("");
   const [pwdNew, setPwdNew] = useState("");
@@ -61,12 +60,34 @@ export default function App() {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
-      setLoading(true); setUser(u);
-      if (!u) { setProfile(null); setLoading(false); return; }
+      setLoading(true);
+
+      // Se não há ninguém autenticado (por exemplo, após um Logout forçado)
+      if (!u) { 
+        setUser(null); 
+        setProfile(null); 
+        setLoading(false); 
+        return; 
+      }
+      
       try {
         const snap = await getDoc(doc(db, "users", u.uid));
         if (snap.exists()) {
-          const p = snap.data(); setProfile(p);
+          const p = snap.data(); 
+
+          // 🚨 SEGURANÇA MÁXIMA: Verifica primeiro se é AUXILIAR
+          if (Array.isArray(p.funcoes) && p.funcoes.includes("AUXILIAR")) {
+            await signOut(auth); // Desliga a sessão no servidor da Google
+            setErr("Acesso negado: O perfil 'Auxiliar' é de registo interno e não tem permissão para entrar no sistema.");
+            setLoading(false);
+            return; // Aborta tudo. A porta não se abre (setUser não é chamado).
+          }
+
+          // Se chegou aqui, é porque o perfil é válido e não é Auxiliar!
+          setErr(""); // Limpa os erros do login
+          setUser(u); // ABRE A PORTA!
+          setProfile(p);
+          
           const metaPromises = [];
           if (p.agrupamentoId) metaPromises.push(getDoc(doc(db, "agrupamento", p.agrupamentoId)));
           if (p.agrupamentoId && p.secaoDocId) metaPromises.push(getDoc(doc(db, "agrupamento", p.agrupamentoId, "secoes", p.secaoDocId)));
@@ -74,23 +95,32 @@ export default function App() {
           if (aSnap?.exists()) setAgrupamentoNome(aSnap.data().nome || "");
           if (sSnap?.exists()) setSecaoNome(sSnap.data().nome || "");
           if (p.tipo === "ELEMENTO") setView("objetivos"); else setView("dashboard");
-        } else { setErr("Perfil não encontrado na base de dados."); }
-      } catch (e) { setErr("Erro de ligação ao servidor."); } 
+        } else { 
+          await signOut(auth);
+          setErr("Perfil não encontrado na base de dados."); 
+        }
+      } catch (e) { 
+        await signOut(auth);
+        setErr("Erro de ligação ao servidor."); 
+      } 
       finally { setLoading(false); }
     });
     return () => unsub();
   }, []);
 
   async function doLogin(e) {
-    e.preventDefault(); setErr("");
+    e.preventDefault(); 
+    setErr("");
     if (!isValidNin(ninInput)) { setErr("O NIN deve ter 13 dígitos."); return; }
-    try { await signInWithEmailAndPassword(auth, ninToEmail(ninInput), password); } 
-    catch (e) { setErr("Credenciais inválidas ou erro de acesso."); }
+    try { 
+      await signInWithEmailAndPassword(auth, ninToEmail(ninInput), password); 
+    } catch (e) { 
+      setErr("Credenciais inválidas ou erro de acesso."); 
+    }
   }
 
   const doLogout = () => { signOut(auth); setView("dashboard"); };
 
-  // --- Lógica: Mudança de Password (Vontade Própria) ---
   async function handleChangePassword(e) {
     e.preventDefault();
     setPwdErr(""); setPwdSuccess("");
@@ -121,7 +151,6 @@ export default function App() {
     }
   }
 
-  // --- Lógica: Mudança de Password (Forçada após Reset da Chefia) ---
   async function handleForcedPasswordChange(e) {
     e.preventDefault();
     setPwdErr(""); setPwdSuccess("");
@@ -185,7 +214,6 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: user ? `linear-gradient(rgba(15,27,37,0.85), rgba(11,20,27,0.95)), url(${azimuteLogo}) center center / cover fixed` : "none" }}>
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px" }}>
         
-        {/* 1. SE NÃO HÁ UTILIZADOR: MOSTRA O LOGIN */}
         {!user ? (
           <div className="az-login-container">
             <div className="az-card">
@@ -205,13 +233,11 @@ export default function App() {
                     <input className="az-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Sua senha" />
                   </div>
                   <button className="az-btn az-btn-primary" disabled={!isValidNin(ninInput)}>Entrar no Agrupamento</button>
-                  {err && <div className="az-error-msg">{err}</div>}
+                  {err && <div className="az-error-msg" style={{ background: "rgba(220, 38, 38, 0.1)", color: "#ef4444", padding: "12px", borderRadius: "8px", border: "1px solid rgba(220, 38, 38, 0.3)", fontSize: "14px", fontWeight: "600", textAlign: "center" }}>{err}</div>}
                 </form>
               </div>
             </div>
           </div>
-
-        // 2. SE HÁ UTILIZADOR MAS FOI ALVO DE RESET: TRANCA O ECRÃ AQUI
         ) : profile?.forcarMudancaPassword ? (
           <div className="az-login-container" style={{ marginTop: "10vh" }}>
             <div className="az-card" style={{ borderColor: "var(--brand-orange)" }}>
@@ -242,8 +268,6 @@ export default function App() {
               </div>
             </div>
           </div>
-
-        // 3. SE ESTÁ TUDO OK: MOSTRA A APLICAÇÃO NORMAL
         ) : (
           <div className="az-app-grid">
             <header className="az-header" style={{ background: "rgba(15,27,37,0.6)", backdropFilter: "blur(10px)" }}>
@@ -289,7 +313,6 @@ export default function App() {
               {view === "dashboard" && <SecaoDashboard profile={profile} onOpenGuiaObjetivos={() => setView("guia_grupo")} />}
             </main>
 
-            {/* MODAL MUDAR PASSWORD (VONTADE PRÓPRIA) */}
             {showPwdModal && (
               <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(5px)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "center" }}>
                 <div className="az-card" style={{ width: "100%", maxWidth: 400, background: "var(--bg-dark)" }}>
@@ -322,7 +345,6 @@ export default function App() {
                 </div>
               </div>
             )}
-
           </div>
         )}
       </div>
