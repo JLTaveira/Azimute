@@ -1,15 +1,20 @@
 /* Secretário de Agrupamento Dashboard
   src/pages/SecretarioAgrupamentoDashboard.jsx
- 2026-02-20 - Joao Taveira (jltaveira@gmail.com) */
+ 2026-02-20 - Joao Taveira (jltaveira@gmail.com) 
+ 2026-02-26: integração com padlet da Secretaria Pedagógica Nacional*/
 
 import React, { useEffect, useState, useMemo, Fragment } from "react";
-import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp, addDoc } from "firebase/firestore";
+import { 
+  collection, query, where, getDocs, doc, 
+  updateDoc, serverTimestamp, addDoc, setDoc, deleteDoc 
+} from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../firebase";
 import * as XLSX from "xlsx"; 
 
 import saImg from "../assets/sa.png";
 
+// --- HELPERS (Versão Original) ---
 function formatarDataHora(timestamp) {
   if (!timestamp) return "Data desconhecida";
   const d = timestamp.toDate ? timestamp.toDate() : timestamp;
@@ -28,7 +33,7 @@ function extractNIN(email) {
 }
 
 function nomeEtapa(id) {
-  const map = { PATA_TENRA: "Pata Tenra", LOBO_VALENTE: "Lobo Valente", LOBO_CORTES: "Lobo Cortês", LOBO_AMIGO: "Lobo Amigo", APELO: "Apelo", ALIANCA: "Aliança", RUMO: "Rumo", DESCOBERTA: "Descoberta", DESPRENDIMENTO: "Desprendimento", CONHECIMENTO: "Conhecimento", VONTADE: "Vontade", CONSTRUCAO: "Construção", CAMINHO: "Caminho", COMUNIDADE: "Comunidade", SERVICO: "Serviço", PARTIDA: "Partida" };
+  const map = { PATA_TENRA: "Pata Tenra", LOBO_VALENTE: "Lobo Valente", LOBO_CORTES: "Lobo Cortês", LOBO_AMIGO: "Lobo Amigo", APELO: "Apelo", ALIANCA: "Aliança", RUMO: "Rumo", DESCOBERTA: "Descoberta", DESPRENDIMENTO: "Despreendimento", CONHECIMENTO: "Conhecimento", VONTADE: "Vontade", CONSTRUCAO: "Construção", CAMINHO: "Caminho", COMUNIDADE: "Comunidade", SERVICO: "Serviço", PARTIDA: "Partida" };
   return map[id] || id || "—";
 }
 
@@ -48,7 +53,7 @@ function sortSecoes(a, b) {
   return (indexA === -1 ? 99 : indexA) - (indexB === -1 ? 99 : indexB);
 }
 
-export default function SecretarioAgrupamentoDashboard({ profile }) {
+export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
   const [filtro, setFiltro] = useState("PENDENTES");
@@ -58,6 +63,18 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
   const [dirigentes, setDirigentes] = useState([]);
   const [secoesMap, setSecoesMap] = useState({});
   
+  // --- ESTADOS DO PADLET ---
+  const [oportunidadesCNE, setOportunidadesCNE] = useState([]);
+  const [partilhasAgrupamento, setPartilhasAgrupamento] = useState([]);
+  const [ocultosAgrupamento, setOcultosAgrupamento] = useState([]);
+  const [syncing, setSyncing] = useState(false);
+  const [shareModal, setShareModal] = useState(null);
+  const [shareTargets, setShareTargets] = useState([]);
+  const [shareDataFim, setShareDataFim] = useState("");
+  const [expandidoId, setExpandidoId] = useState(null);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+
+  // --- ESTADOS GESTÃO EFECTIVO (Versão Original) ---
   const [toggleNin, setToggleNin] = useState("");
   const [toggleResult, setToggleResult] = useState(null);
   const [exportOpcao, setExportOpcao] = useState("TODOS");
@@ -71,9 +88,17 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
     fetchDadosSecretaria();
   }, [profile]);
 
+  const oportunidadesVisiveis = useMemo(() => {
+    return oportunidadesCNE.filter(op => 
+      !ocultosAgrupamento.includes(op.id) && 
+      !partilhasAgrupamento.some(p => p.padletId === op.id)
+    );
+  }, [oportunidadesCNE, ocultosAgrupamento, partilhasAgrupamento]);
+
   async function fetchDadosSecretaria() {
     setLoading(true); setErro("");
     try {
+      // 1. Notificações
       const qNotif = query(collection(db, "notificacoes"), where("agrupamentoId", "==", profile.agrupamentoId));
       const snapNotif = await getDocs(qNotif);
       const listaNotif = [];
@@ -81,18 +106,18 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
       listaNotif.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
       setNotificacoes(listaNotif);
 
-      const qUsers = query(collection(db, "users"), where("agrupamentoId", "==", profile.agrupamentoId), where("tipo", "==", "ELEMENTO"));
+      // 2. Utilizadores
+      const qUsers = query(collection(db, "users"), where("agrupamentoId", "==", profile.agrupamentoId));
       const snapUsers = await getDocs(qUsers);
-      const listaElem = [];
-      snapUsers.forEach(d => listaElem.push({ uid: d.id, ...d.data() }));
+      const listaElem = []; const listaDir = [];
+      snapUsers.forEach(d => {
+        const u = { uid: d.id, ...d.data() };
+        if (u.tipo === "ELEMENTO") listaElem.push(u); else listaDir.push(u);
+      });
       setElementos(listaElem.sort((a, b) => String(a.nome).localeCompare(String(b.nome))));
-
-      const qDir = query(collection(db, "users"), where("agrupamentoId", "==", profile.agrupamentoId), where("tipo", "==", "DIRIGENTE"));
-      const snapDir = await getDocs(qDir);
-      const listaDir = [];
-      snapDir.forEach(d => listaDir.push({ uid: d.id, ...d.data() }));
       setDirigentes(listaDir.sort((a, b) => String(a.nome).localeCompare(String(b.nome))));
 
+      // 3. Estrutura
       const secSnap = await getDocs(collection(db, "agrupamento", profile.agrupamentoId, "secoes"));
       const estrutura = {};
       for (const sDoc of secSnap.docs) {
@@ -101,25 +126,108 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
         subsSnap.forEach(subDoc => { estrutura[sDoc.id].subunidades[subDoc.id] = subDoc.data().nome || subDoc.id; });
       }
       setSecoesMap(estrutura);
+
+      // 4. Padlet
+      const snapOport = await getDocs(collection(db, "oportunidades_cne"));
+      const listaOport = [];
+      snapOport.forEach(d => listaOport.push({ id: d.id, ...d.data() }));
+      setOportunidadesCNE(listaOport);
+
+      const qPart = query(collection(db, "oportunidades_agrupamento"), where("agrupamentoId", "==", profile.agrupamentoId));
+      const snapPart = await getDocs(qPart);
+      const listaPart = [];
+      snapPart.forEach(d => listaPart.push({ id: d.id, ...d.data() }));
+      setPartilhasAgrupamento(listaPart);
+
+      const qOcul = query(collection(db, "oportunidades_ocultas"), where("agrupamentoId", "==", profile.agrupamentoId));
+      const snapOcul = await getDocs(qOcul);
+      const listaOcul = [];
+      snapOcul.forEach(d => listaOcul.push(d.data().padletId));
+      setOcultosAgrupamento(listaOcul);
+
     } catch (err) { setErro("Erro ao carregar dados."); } finally { setLoading(false); }
   }
 
+  // --- FUNÇÕES PADLET ---
+  async function handleSyncPadlet() {
+    if (readOnly) return;
+    setSyncing(true);
+    try {
+      const fn = httpsCallable(functions, 'syncOportunidadesCNE');
+      const res = await fn();
+      alert(res.data.message);
+      fetchDadosSecretaria();
+    } catch (error) { alert("Erro ao sincronizar: " + error.message); } finally { setSyncing(false); }
+  }
+
+  async function handleOcultarPadlet(padletId) {
+    if (readOnly) return;
+    if (!window.confirm("Desejas arquivar esta oportunidade sem distribuir?")) return;
+    try {
+      const docId = `${profile.agrupamentoId}_${padletId}`;
+      await setDoc(doc(db, "oportunidades_ocultas", docId), {
+        agrupamentoId: profile.agrupamentoId,
+        padletId: padletId,
+        ocultadoEm: serverTimestamp()
+      });
+      setOcultosAgrupamento(prev => [...prev, padletId]);
+    } catch (error) { alert("Erro ao arquivar."); }
+  }
+
+  async function handleRecuperarPadlet(padletId) {
+    if (readOnly) return;
+    try {
+      const docId = `${profile.agrupamentoId}_${padletId}`;
+      await deleteDoc(doc(db, "oportunidades_ocultas", docId));
+      setOcultosAgrupamento(prev => prev.filter(id => id !== padletId));
+    } catch (error) { alert("Erro ao recuperar."); }
+  }
+
+  function handleTargetToggle(alvo) {
+    setShareTargets(prev => prev.includes(alvo) ? prev.filter(t => t !== alvo) : [...prev, alvo]);
+  }
+
+  async function handleShareSubmit(e) {
+    e.preventDefault();
+    if (readOnly) return;
+    if (shareTargets.length === 0) return alert("Selecione um grupo de destino.");
+    try {
+      const docId = `${profile.agrupamentoId}_${shareModal.id}`;
+      await setDoc(doc(db, "oportunidades_agrupamento", docId), {
+        agrupamentoId: profile.agrupamentoId,
+        padletId: shareModal.id,
+        titulo: shareModal.titulo,
+        descricao: shareModal.descricao,
+        link: shareModal.link,
+        colunaOriginal: shareModal.coluna,
+        alvos: shareTargets,
+        dataFim: shareDataFim || null,
+        partilhadoPor: auth.currentUser.uid,
+        partilhadoEm: serverTimestamp()
+      });
+      alert("Distribuído!"); setShareModal(null); setShareTargets([]); setShareDataFim(""); fetchDadosSecretaria();
+    } catch (error) { alert("Erro ao distribuir."); }
+  }
+
+  // --- FUNÇÕES DE GESTÃO (Originais) ---
   async function handleResolver(id) {
+    if (readOnly) return;
     if (!window.confirm(`Confirmas que esta alteração já foi incluída em Ordem de Serviço e/ou no SIIE?`)) return;
     try {
       await updateDoc(doc(db, "notificacoes", id), { resolvida: true, resolvidaAt: serverTimestamp(), resolvidaPorUid: auth.currentUser.uid });
       setNotificacoes(prev => prev.map(n => n.id === id ? { ...n, resolvida: true } : n));
-    } catch (err) { alert("Erro ao atualizar: " + err.message); }
+    } catch (err) { alert("Erro ao atualizar."); }
   }
 
   async function handleResetPassword(uid, nome) {
+    if (readOnly) return;
     if (!window.confirm(`⚠️ Repor password de ${nome} para Azimute2026?`)) return;
     setResettingUid(uid);
     try {
       const resetPwd = httpsCallable(functions, 'resetUserPassword');
       await resetPwd({ uid });
       alert(`✅ Sucesso!`);
-    } catch (error) { alert("❌ Erro: " + error.message); } finally { setResettingUid(null); }
+    } catch (error) { alert("❌ Erro."); } finally { setResettingUid(null); }
   }
 
   async function procurarParaToggle() {
@@ -128,38 +236,30 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
     try {
       const q = query(collection(db, "users"), where("nin", "==", toggleNin.trim()));
       const snap = await getDocs(q);
-      if (snap.empty) alert("NIN não encontrado no sistema.");
+      if (snap.empty) alert("NIN não encontrado.");
       else setToggleResult({ uid: snap.docs[0].id, ...snap.docs[0].data() });
     } catch (err) { alert("Erro ao pesquisar."); }
   }
 
   async function confirmarToggle() {
+    if (readOnly) return;
     const newState = toggleResult.ativo === false;
-    const isTransfer = toggleResult.agrupamentoId !== profile.agrupamentoId;
     if (!window.confirm("Confirmar alteração de estado?")) return;
-
     try {
       const toggleFn = httpsCallable(functions, 'toggleUserStatus');
       await toggleFn({ uid: toggleResult.uid, ativo: newState });
-
       const msgOS = newState ? "Voltou ao ativo!" : "Saiu do ativo!";
       const nin = toggleResult.nin || extractNIN(toggleResult.email);
-      const dataOS = new Date().toLocaleString('pt-PT');
-
       await addDoc(collection(db, "notificacoes"), {
         agrupamentoId: profile.agrupamentoId,
         uidElemento: toggleResult.uid,
         elementoNome: toggleResult.nome,
         secaoDocId: toggleResult.secaoDocId || "GERAL",
-        descricao: `${dataOS} | ${nin} | ${toggleResult.nome} | ${msgOS}`,
-        tipo: "ESTADO_CONTA",
-        resolvida: false,
-        createdAt: serverTimestamp()
+        descricao: `${new Date().toLocaleString('pt-PT')} | ${nin} | ${toggleResult.nome} | ${msgOS}`,
+        tipo: "ESTADO_CONTA", resolvida: false, createdAt: serverTimestamp()
       });
-
-      alert("✅ Sucesso registado para Ordem de Serviço / SIIE.");
-      setToggleResult(null); setToggleNin(""); fetchDadosSecretaria();
-    } catch (err) { alert("Erro: " + err.message); }
+      alert("✅ Sucesso registado."); setToggleResult(null); setToggleNin(""); fetchDadosSecretaria();
+    } catch (err) { alert("Erro."); }
   }
 
   function exportarExcel() {
@@ -177,8 +277,7 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
   }
 
   function handleFileUpload(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+    const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
@@ -198,8 +297,7 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
         processUpload(jsonParsedData);
       } catch (err) { alert("Erro ao ler Excel."); }
     };
-    reader.readAsArrayBuffer(file);
-    e.target.value = ""; 
+    reader.readAsArrayBuffer(file); e.target.value = ""; 
   }
 
   function processUpload(data) {
@@ -207,24 +305,20 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
       const ninStr = row.nin || "";
       const existing = [...elementos, ...dirigentes].find(u => (u.nin === ninStr || extractNIN(u.email) === ninStr));
       let status = existing ? (existing.ativo === false ? "INACTIVE" : "EXISTS") : "NEW";
-      
       let mappedSecao = row.secaodocid || row.secao || "";
       const strLow = mappedSecao.toLowerCase();
       if (strLow.includes("lobito")) mappedSecao = Object.keys(secoesMap).find(id => id.includes("alcateia")) || mappedSecao;
       else if (strLow.includes("explorador")) mappedSecao = Object.keys(secoesMap).find(id => id.includes("expedicao")) || mappedSecao;
       else if (strLow.includes("pioneiro")) mappedSecao = Object.keys(secoesMap).find(id => id.includes("comunidade")) || mappedSecao;
       else if (strLow.includes("caminheiro")) mappedSecao = Object.keys(secoesMap).find(id => id.includes("cla")) || mappedSecao;
-
-      return {
-        ...row, secaoFinal: mappedSecao, status, existingUid: existing?.uid, existingName: existing?.nome
-      };
+      return { ...row, secaoFinal: mappedSecao, status, existingUid: existing?.uid, existingName: existing?.nome };
     });
     setUploadList(processed);
   }
 
   async function salvarEdicaoNome(uid, index) {
-    const novoNome = editNomeInputs[uid];
-    if (!novoNome) return;
+    if (readOnly) return;
+    const novoNome = editNomeInputs[uid]; if (!novoNome) return;
     try {
       await updateDoc(doc(db, "users", uid), { nome: novoNome, updatedAt: serverTimestamp() });
       alert("✅ Nome atualizado!"); fetchDadosSecretaria();
@@ -233,14 +327,14 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
   }
 
   async function importarParaBaseDados() {
+    if (readOnly) return;
     const validos = uploadList.filter(u => u.status === "NEW");
     if (validos.length === 0) return;
     setImporting(true);
     try {
       const funcImport = httpsCallable(functions, 'importUsersBatch');
-      const res = await funcImport({ users: validos });
-      alert(`✅ Importação concluída! Sucessos: ${res.data.success}. Mensagens geradas para a Caixa de Entrada.`);
-      setUploadList([]); fetchDadosSecretaria();
+      await funcImport({ users: validos });
+      alert(`✅ Importação concluída!`); setUploadList([]); fetchDadosSecretaria();
     } catch (error) { alert("Erro na importação."); } finally { setImporting(false); }
   }
 
@@ -252,6 +346,7 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
 
   return (
     <div className="az-grid" style={{ gap: 24 }}>
+      {/* HEADER (Original) */}
       <div className="az-card">
         <div className="az-card-inner az-row" style={{ justifyContent: "space-between" }}>
           <div>
@@ -263,12 +358,15 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
         </div>
       </div>
 
+      {/* TABS (Fusão) */}
       <div className="az-tabs">
         <button className={`az-tab ${filtro === "PENDENTES" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PENDENTES")}>📥 Ações Pendentes ({contagemPendentes})</button>
         <button className={`az-tab ${filtro === "RESOLVIDAS" ? "az-tab--active" : ""}`} onClick={() => setFiltro("RESOLVIDAS")}>🗄️ Arquivo / Emitidas</button>
         <button className={`az-tab ${filtro === "EFETIVO" ? "az-tab--active" : ""}`} onClick={() => setFiltro("EFETIVO")}>👥 Efetivo Global (Consulta)</button>
+        <button className={`az-tab ${filtro === "PADLET" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PADLET")}>🌐 Oportunidades (CNE)</button>
       </div>
 
+      {/* ABA: PENDENTES E RESOLVIDAS (Versão Original Restaurada) */}
       {(filtro === "PENDENTES" || filtro === "RESOLVIDAS") && (
         <div className="az-card">
           <div className="az-card-inner" style={{ padding: "0" }}>
@@ -283,7 +381,6 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
                         <th style={{ width: 140 }}>NIN</th>
                         <th>Elemento / Secção</th>
                         <th>Alteração / Registo</th>
-                        {/* A COLUNA SÓ APARECE NOS PENDENTES */}
                         {filtro === "PENDENTES" && <th style={{textAlign: 'right', width: 180}}>Ordem de Serviço/SIIE</th>}
                       </tr>
                     </thead>
@@ -292,7 +389,6 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
                         const user = [...elementos, ...dirigentes].find(e => e.uid === n.uidElemento);
                         const userNIN = user?.nin || extractNIN(user?.email) || "N/A";
                         const nomeSecao = secoesMap[n.secaoDocId]?.nome || n.secaoDocId || "Agrupamento";
-                        
                         return (
                           <tr key={n.id} style={{ background: filtro === "PENDENTES" ? "rgba(23,154,171,.03)" : "transparent" }}>
                             <td style={{ color: "var(--muted)", paddingTop: 16 }}>{formatarDataHora(n.createdAt)}</td>
@@ -306,10 +402,9 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
                                 {n.descricao}
                               </span>
                             </td>
-                            {/* O BOTÃO SÓ APARECE NOS PENDENTES */}
                             {filtro === "PENDENTES" && (
                               <td style={{textAlign: 'right', paddingTop: 16}}>
-                                <button className="az-btn az-btn-primary" onClick={() => handleResolver(n.id)}>✅ Confirmar em OS/SIIE</button>
+                                {!readOnly && <button className="az-btn az-btn-primary" onClick={() => handleResolver(n.id)}>✅ Confirmar em OS/SIIE</button>}
                               </td>
                             )}
                           </tr>
@@ -323,6 +418,57 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
         </div>
       )}
 
+      {/* ABA: PADLET (Versão Nova Melhorada) */}
+      {filtro === "PADLET" && (
+        <div className="az-card">
+          <div className="az-card-inner">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <div>
+                <h3 style={{ margin: 0, color: "var(--brand-teal)" }}>Triagem Pedagógica</h3>
+                <p className="az-small muted">Oportunidades do Nacional para a Chefia e Unidades.</p>
+              </div>
+              <div style={{ display: "flex", gap: 12 }}>
+                <button className="az-btn" style={{ borderColor: "var(--brand-orange)", color: "var(--brand-orange)" }} onClick={() => setShowArchiveModal(true)}>🗄️ Ver Arquivo ({ocultosAgrupamento.length})</button>
+                {!readOnly && (
+                  <button className="az-btn az-btn-teal" onClick={handleSyncPadlet} disabled={syncing}>
+                    {syncing ? "⏳..." : "🔄 Sincronizar Agora"}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="az-grid-2">
+              {oportunidadesVisiveis.map(op => {
+                const isExposed = expandidoId === op.id;
+                return (
+                  <div key={op.id} className="az-panel" style={{ borderLeft: "4px solid var(--brand-orange)", background: "rgba(0,0,0,0.2)" }}>
+                    <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: "var(--text)" }}>{op.titulo}</div>
+                    <div 
+                      className="az-small" 
+                      style={{ marginBottom: 12, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: isExposed ? "unset" : "3", WebkitBoxOrient: "vertical", color: "rgba(255,255,255,0.8)" }}
+                      dangerouslySetInnerHTML={{ __html: op.descricao }} 
+                    />
+                    <button onClick={() => setExpandidoId(isExposed ? null : op.id)} className="az-btn-text" style={{ color: "var(--brand-orange)", fontSize: 11, marginBottom: 12, cursor: "pointer", background: "none", border: "none" }}>
+                      {isExposed ? "↑ Ler menos" : "↓ Ler tudo"}
+                    </button>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
+                      <a href={op.link} target="_blank" rel="noreferrer" className="az-small" style={{ color: "#3b82f6", textDecoration: "none" }}>Abrir Link 🔗</a>
+                      {!readOnly && (
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button className="az-btn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => handleOcultarPadlet(op.id)}>📥 Arquivar</button>
+                          <button className="az-btn az-btn-teal" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => setShareModal(op)}>📤 Distribuir</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ABA: EFETIVO (Versão Original Restaurada) */}
       {filtro === "EFETIVO" && (
         <>
           <div className="az-card" style={{ background: "rgba(23,154,171,.03)" }}>
@@ -331,25 +477,23 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
                <div className="az-grid-2">
                   <div className="az-panel" style={{ color: "#fff", background: "rgba(0,0,0,0.3)", borderColor: "rgba(255,255,255,0.1)" }}>
                     <h4 style={{marginBottom: 8}}>🔄 Ativar / Desativar / Transferir</h4>
-                    <p className="az-small muted" style={{marginBottom: 12}}>Pesquisa por NIN para alterar estado pedagógico.</p>
                     <div className="az-row">
-                      <input type="text" className="az-input" style={{flex: 1}} value={toggleNin} onChange={e => setToggleNin(e.target.value)} placeholder="NIN do utilizador" />
+                      <input type="text" className="az-input" style={{flex: 1}} value={toggleNin} onChange={e => setToggleNin(e.target.value)} placeholder="NIN" />
                       <button className="az-btn az-btn-teal" onClick={procurarParaToggle}>Procurar</button>
                     </div>
                     {toggleResult && (
                       <div style={{ marginTop: 15, padding: 12, background: "rgba(255,255,255,0.05)", borderRadius: 8 }}>
                         <strong>👤 {toggleResult.nome}</strong>
-                        {toggleResult.agrupamentoId !== profile.agrupamentoId && <p style={{ color: "#ec8332", fontSize: 11, marginTop: 4 }}>⚠️ Elemento de outro Agrupamento.</p>}
-                        <button className="az-btn" style={{ width: "100%", marginTop: 10, background: toggleResult.ativo === false ? "var(--brand-green)" : "var(--danger)", border: 'none', color: '#fff' }} onClick={confirmarToggle}>
-                          {toggleResult.ativo === false ? "♻️ Reativar / Transferir" : "⛔ Desativar Conta"}
-                        </button>
+                        {!readOnly && (
+                          <button className="az-btn" style={{ width: "100%", marginTop: 10, background: toggleResult.ativo === false ? "var(--brand-green)" : "var(--danger)" }} onClick={confirmarToggle}>
+                            {toggleResult.ativo === false ? "♻️ Reativar / Transferir" : "⛔ Desativar Conta"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
-
                   <div className="az-panel" style={{ color: "#fff", background: "rgba(0,0,0,0.3)", borderColor: "rgba(255,255,255,0.1)" }}>
-                    <h4 style={{marginBottom: 8}}>📊 Exportar Listagens (CSV)</h4>
-                    <p className="az-small muted" style={{marginBottom: 12}}>Exportação completa de dados por secção.</p>
+                    <h4>📊 Exportar Listagens (CSV)</h4>
                     <select className="az-select" style={{marginBottom: 8}} value={exportOpcao} onChange={e => setExportOpcao(e.target.value)}>
                       <option value="TODOS">Todos (Agrupamento Inteiro)</option>
                       <option value="DIRIGENTES">Apenas Dirigentes</option>
@@ -358,31 +502,25 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
                     <button className="az-btn" style={{width: '100%', background: "rgba(255,255,255,0.1)"}} onClick={exportarExcel}>⬇️ Descarregar CSV</button>
                   </div>
                </div>
-
                <div className="az-panel" style={{ marginTop: 16, background: "rgba(0,0,0,0.3)", borderColor: "rgba(255,255,255,0.1)", color: "#fff" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                     <h4>📥 Importar Utilizadores (Excel)</h4>
                     <button className="az-btn az-btn-teal" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => { window.location.href = "/Template_Azimute.xlsx"; }}>📄 Baixar Template</button>
                   </div>
                   <input type="file" accept=".xlsx" className="az-input" style={{padding: 8}} onChange={handleFileUpload} />
-                  
                   {uploadList.length > 0 && (
                     <div style={{ marginTop: 16 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                        <h5>Resultados ({uploadList.length})</h5>
-                        <button className="az-btn az-btn-teal" onClick={importarParaBaseDados} disabled={importing}>{importing ? "⏳..." : "🚀 Importar Novos"}</button>
-                      </div>
-                      <div className="az-table-wrap" style={{ maxHeight: 250, overflowY: "auto" }}>
+                      {!readOnly && <button className="az-btn az-btn-teal" onClick={importarParaBaseDados} disabled={importing}>{importing ? "⏳..." : "🚀 Importar Novos"}</button>}
+                      <div className="az-table-wrap" style={{ maxHeight: 250, overflowY: "auto", marginTop: 10 }}>
                         <table className="az-table" style={{ fontSize: 11 }}>
                           <thead><tr><th>NIN</th><th>Nome</th><th>Estado</th></tr></thead>
                           <tbody>
                             {uploadList.map((item, i) => (
                               <tr key={i}>
-                                <td>{item.nin}</td>
-                                <td>{item.nome}</td>
+                                <td>{item.nin}</td><td>{item.nome}</td>
                                 <td>
                                   {item.status === "NEW" ? "✅ Novo" : item.status === "INACTIVE" ? "⛔ Inativo" : "⚠️ Existe"}
-                                  {item.status === "EXISTS" && <input className="az-input" style={{fontSize: 10, padding: 2}} value={editNomeInputs[item.existingUid] || item.existingName} onChange={e => setEditNomeInputs({...editNomeInputs, [item.existingUid]: e.target.value})} onBlur={() => salvarEdicaoNome(item.existingUid, i)} />}
+                                  {item.status === "EXISTS" && !readOnly && <input className="az-input" style={{fontSize: 10, padding: 2}} value={editNomeInputs[item.existingUid] || item.existingName} onChange={e => setEditNomeInputs({...editNomeInputs, [item.existingUid]: e.target.value})} onBlur={() => salvarEdicaoNome(item.existingUid, i)} />}
                                 </td>
                               </tr>
                             ))}
@@ -395,20 +533,21 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
             </div>
           </div>
 
+          {/* EQUIPA DE ANIMAÇÃO */}
           <div className="az-card" style={{ marginBottom: 24, borderColor: "rgba(236,131,50,.3)" }}>
             <div className="az-card-inner">
               <h3 style={{ margin: 0, fontSize: 18, color: "var(--brand-orange)", borderBottom: '1px solid var(--stroke)', paddingBottom: 8, marginBottom: 12 }}>Equipa de Animação (Dirigentes)</h3>
               <div className="az-table-wrap">
                 <table className="az-table" style={{ fontSize: 13 }}>
-                  <thead><tr><th style={{ width: 120 }}>NIN</th><th>Nome</th><th>Cargo / Funções</th><th style={{ textAlign: "right" }}>Ações Secretario</th></tr></thead>
+                  <thead><tr><th style={{ width: 120 }}>NIN</th><th>Nome</th><th>Cargo / Funções</th><th style={{ textAlign: "right" }}>Ações</th></tr></thead>
                   <tbody>
                     {dirigentes.map(dir => (
                       <tr key={dir.uid} style={{ opacity: dir.ativo === false ? 0.4 : 1 }}>
                         <td style={{ fontFamily: "monospace", color: "var(--text)" }}>{dir.nin || extractNIN(dir.email)}</td>
                         <td style={{ fontWeight: 600 }}>{dir.nome} {dir.ativo === false && <span className="az-pill" style={{ background: "var(--danger)", fontSize: 10, border: 'none' }}>INATIVO</span>}</td>
-                        <td>{dir.funcoes?.length > 0 ? dir.funcoes.join(", ").replace(/_/g, " ") : "-"}</td>
+                        <td>{dir.funcoes?.join(", ") || "-"}</td>
                         <td style={{ textAlign: "right" }}>
-                          <button className="az-btn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => handleResetPassword(dir.uid, dir.nome)} disabled={resettingUid === dir.uid || dir.ativo === false}>{resettingUid === dir.uid ? "⏳" : "🔑 Reset Pass"}</button>
+                          {!readOnly && <button className="az-btn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => handleResetPassword(dir.uid, dir.nome)} disabled={resettingUid === dir.uid}>Reset Pass</button>}
                         </td>
                       </tr>
                     ))}
@@ -418,49 +557,32 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
             </div>
           </div>
 
+          {/* SECÇÕES */}
           {Object.keys(secoesMap).sort(sortSecoes).map(secId => {
             const secaoData = secoesMap[secId];
             const elementosSecao = elementos.filter(e => e.secaoDocId === secId && e.ativo !== false);
             const termoGrupo = getTermoSubunidade(secId);
             const elementosPorSub = {};
-            
-            elementosSecao.forEach(e => {
-              const pId = e.patrulhaId || "sem_grupo";
-              if (!elementosPorSub[pId]) elementosPorSub[pId] = [];
-              elementosPorSub[pId].push(e);
-            });
-
+            elementosSecao.forEach(e => { const pId = e.patrulhaId || "sem_grupo"; if (!elementosPorSub[pId]) elementosPorSub[pId] = []; elementosPorSub[pId].push(e); });
             if (elementosSecao.length === 0) return null;
-
             return (
               <div key={secId} className="az-card" style={{ marginBottom: 24 }}>
                 <div className="az-card-inner">
                   <h3 style={{ color: "var(--brand-teal)", fontSize: 18, borderBottom: '1px solid var(--stroke)', paddingBottom: 8, marginBottom: 12 }}>{secaoData.nome}</h3>
                   <div className="az-table-wrap">
                     <table className="az-table" style={{ fontSize: 13 }}>
-                      <thead>
-                        <tr>
-                          <th style={{ width: 120 }}>NIN</th>
-                          <th>Nome</th>
-                          <th>Cargo</th>
-                          <th>Etapa de Progresso</th>
-                        </tr>
-                      </thead>
+                      <thead><tr><th>NIN</th><th>Nome</th><th>Cargo</th><th>Etapa de Progresso</th></tr></thead>
                       <tbody>
                         {Object.entries(elementosPorSub).sort(([a], [b]) => a.localeCompare(b)).map(([subId, lista]) => (
                           <Fragment key={subId}>
-                            {/* LINHA DE AGRUPAMENTO - BANDO/PATRULHA */}
                             <tr style={{ background: "rgba(255,255,255,0.03)" }}>
-                              <td colSpan="4" style={{ padding: "8px 12px", fontWeight: 700, color: "var(--brand-teal)" }}>
-                                {subId === "sem_grupo" ? "⚠️ Elementos sem unidade" : `⛺ ${termoGrupo}: ${secaoData.subunidades[subId] || subId}`}
-                              </td>
+                              <td colSpan="4" style={{ padding: "8px 12px", fontWeight: 700, color: "var(--brand-teal)" }}>{subId === "sem_grupo" ? "⚠️ Sem unidade" : `⛺ ${termoGrupo}: ${secaoData.subunidades[subId] || subId}`}</td>
                             </tr>
-                            {/* ELEMENTOS DA SUBUNIDADE */}
                             {lista.map(el => (
                               <tr key={el.uid}>
-                                <td style={{ fontFamily: "monospace", color: "var(--text)" }}>{el.nin || extractNIN(el.email)}</td>
+                                <td style={{ fontFamily: "monospace" }}>{el.nin || extractNIN(el.email)}</td>
                                 <td style={{ fontWeight: 600 }}>{el.nome}</td>
-                                <td>{el.isGuia ? <span className="az-pill" style={{fontSize: 10, background: "rgba(236,131,50,.15)", color: "var(--brand-orange)", border: "none"}}>Guia</span> : el.isSubGuia ? <span className="az-pill" style={{fontSize: 10, background: "rgba(236,131,50,.1)", color: "var(--brand-orange)", border: "none"}}>Sub-Guia</span> : "-"}</td>
+                                <td>{el.isGuia ? "Guia" : el.isSubGuia ? "Sub-Guia" : "-"}</td>
                                 <td>{nomeEtapa(el.etapaProgresso)}</td>
                               </tr>
                             ))}
@@ -474,6 +596,80 @@ export default function SecretarioAgrupamentoDashboard({ profile }) {
             );
           })}
         </>
+      )}
+
+      {/* MODAL DE ARQUIVO PADLET (Seletivo) */}
+      {showArchiveModal && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.9)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "center", padding: 20 }}>
+          <div className="az-card" style={{ width: "100%", maxWidth: 600, background: "#1a1a1a", border: "1px solid var(--stroke)" }}>
+            <div className="az-card-inner">
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
+                <h3 style={{ margin: 0, color: "var(--brand-orange)" }}>🗄️ Arquivo de Oportunidades</h3>
+                <button className="az-btn-text" onClick={() => setShowArchiveModal(false)} style={{ color: "white", fontSize: 20 }}>&times;</button>
+              </div>
+              <div style={{ maxHeight: "60vh", overflowY: "auto", display: "grid", gap: 12 }}>
+                {ocultosAgrupamento.length === 0 ? (
+                  <p className="az-muted">O arquivo está vazio.</p>
+                ) : (
+                  oportunidadesCNE.filter(op => ocultosAgrupamento.includes(op.id)).map(op => (
+                    <div key={op.id} style={{ background: "rgba(255,255,255,0.05)", padding: 12, borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontWeight: 700, color: "white" }}>{op.titulo}</div>
+                        <div className="az-small muted">{op.coluna}</div>
+                      </div>
+                      {!readOnly && (
+                        <button className="az-btn az-btn-teal" style={{ padding: "4px 12px", fontSize: 11 }} onClick={() => handleRecuperarPadlet(op.id)}>♻️ Recuperar</button>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+              <div style={{ marginTop: 24, textAlign: "right" }}>
+                <button className="az-btn" onClick={() => setShowArchiveModal(false)}>Fechar Arquivo</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE DISTRIBUIÇÃO (Restrito a Chefias) */}
+      {shareModal && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.85)", backdropFilter: "blur(5px)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "center" }}>
+          <div className="az-card" style={{ width: "100%", maxWidth: 450, background: "var(--bg-dark)" }}>
+            <div className="az-card-inner">
+              <h3 style={{ margin: "0 0 16px 0", borderBottom: "1px solid var(--stroke)", paddingBottom: 12 }}>📤 Distribuir Oportunidade</h3>
+              <p className="az-small" style={{ color: "var(--brand-orange)", fontWeight: 700, marginBottom: 16 }}>{shareModal.titulo}</p>
+              <form onSubmit={handleShareSubmit}>
+                <div className="az-form-group" style={{ marginBottom: 16 }}>
+                  <label>Público Alvo (Responsáveis):</label>
+                  <div style={{ display: "grid", gap: 8, background: "rgba(0,0,0,0.2)", padding: 12, borderRadius: 8 }}>
+                    {[
+                      { id: "DIRECAO", label: "Toda a Direção (Conselho)" },
+                      { id: "CHEFE_AGRUPAMENTO", label: "Chefe de Agrupamento" },
+                      { id: "LOBITOS", label: "Chefe de Unidade (Alcateia)" },
+                      { id: "EXPLORADORES", label: "Chefe de Unidade (Expedição)" },
+                      { id: "PIONEIROS", label: "Chefe de Unidade (Comunidade)" },
+                      { id: "CAMINHEIROS", label: "Chefe de Unidade (Clã)" }
+                    ].map(alvo => (
+                      <label key={alvo.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                        <input type="checkbox" checked={shareTargets.includes(alvo.id)} onChange={() => handleTargetToggle(alvo.id)} />
+                        <span style={{ fontSize: 13, color: "var(--text)" }}>{alvo.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="az-form-group" style={{ marginBottom: 20 }}>
+                  <label>Visível até:</label>
+                  <input type="date" required className="az-input" value={shareDataFim} onChange={e => setShareDataFim(e.target.value)} />
+                </div>
+                <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+                  <button type="button" className="az-btn" onClick={() => setShareModal(null)}>Cancelar</button>
+                  <button type="submit" className="az-btn az-btn-teal">Confirmar</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

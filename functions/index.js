@@ -7,6 +7,8 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
+const axios = require("axios");
+const xml2js = require("xml2js");
 
 // Inicializa o Admin SDK
 if (admin.apps.length === 0) {
@@ -57,9 +59,6 @@ exports.resetUserPassword = onCall(async (request) => {
 // ============================================================================
 // 2. IMPORTAÇÃO DE UTILIZADORES
 // ============================================================================
-// ============================================================================
-// 2. IMPORTAÇÃO DE UTILIZADORES
-// ============================================================================
 exports.importUsersBatch = onCall(async (request) => {
   const { data, auth } = request;
   if (!auth) throw new HttpsError("unauthenticated", "Sem permissão.");
@@ -73,7 +72,6 @@ exports.importUsersBatch = onCall(async (request) => {
   }
 
   const results = { success: 0, errors: [] };
-  // Formata a data para a mensagem de OS
   const dataOS = new Date().toLocaleString("pt-PT", { timeZone: "Europe/Lisbon" });
 
   for (const u of data.users) {
@@ -99,7 +97,6 @@ exports.importUsersBatch = onCall(async (request) => {
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
 
-      // 🚨 GERA A MENSAGEM AUTOMÁTICA DE IMPORTAÇÃO PARA O SIIE
       await db.collection("notificacoes").add({
         agrupamentoId: callerProfile.agrupamentoId,
         uidElemento: userRecord.uid,
@@ -118,6 +115,7 @@ exports.importUsersBatch = onCall(async (request) => {
   }
   return results;
 });
+
 // ============================================================================
 // 3. ATIVAR / DESATIVAR UTILIZADOR
 // ============================================================================
@@ -132,7 +130,6 @@ exports.toggleUserStatus = onCall(async (request) => {
     const callerSnap = await db.collection("users").doc(auth.uid).get();
     const caller = callerSnap.data();
     
-    // Verificação de segurança (Secretaria ou Chefia)
     if (!caller.funcoes?.includes("SECRETARIO_AGRUPAMENTO") && !caller.funcoes?.includes("CHEFE_AGRUPAMENTO")) {
       throw new HttpsError("permission-denied", "Apenas a Secretaria tem permissão.");
     }
@@ -146,29 +143,86 @@ exports.toggleUserStatus = onCall(async (request) => {
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     };
 
-    // LÓGICA DE TRANSFERÊNCIA: Se ativar e o agrupamento for diferente
     if (ativo === true && targetData.agrupamentoId !== caller.agrupamentoId) {
       updateData = {
         ...updateData,
-        agrupamentoId: caller.agrupamentoId, // Assume o novo agrupamento
-        // Limpeza pedagógica
+        agrupamentoId: caller.agrupamentoId,
         etapaProgresso: null,
         funcoes: [],
         patrulhaId: null,
         secaoDocId: null,
         isGuia: false,
         isSubGuia: false,
-        tipo: "ELEMENTO" // Reset por defeito para ser reatribuído
+        tipo: "ELEMENTO"
       };
     }
 
     await targetRef.update(updateData);
-
-    // Bloqueia/Desbloqueia Login
     await admin.auth().updateUser(uid, { disabled: !ativo });
 
     return { success: true };
   } catch (error) {
     throw new HttpsError("internal", error.message);
+  }
+});
+
+// ============================================================================
+// 4. SINCRONIZAÇÃO DE OPORTUNIDADES EDUCATIVAS (PADLET CNE)
+// ============================================================================
+// ============================================================================
+// 4. SINCRONIZAÇÃO REAL DO PADLET (VERSÃO FINAL)
+// ============================================================================
+exports.syncOportunidadesCNE = onCall(async (request) => {
+  const { auth } = request;
+  if (!auth) throw new HttpsError("unauthenticated", "Sem permissão.");
+
+  const db = admin.firestore();
+  
+  // O URL real que encontraste no código-fonte do Padlet!
+  const PADLET_RSS_URL = "https://padlet.com/padlets/msoqzzz192up2go7/exports/feed.xml";
+
+  try {
+    const response = await axios.get(PADLET_RSS_URL, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Azimute Bot 1.0)' }
+    });
+    
+    const parser = new xml2js.Parser({ explicitArray: false });
+    const result = await parser.parseStringPromise(response.data);
+    
+    const itemsRaw = result.rss?.channel?.item;
+    if (!itemsRaw) return { success: true, message: "Não foram encontradas novas publicações." };
+
+    const items = Array.isArray(itemsRaw) ? itemsRaw : [itemsRaw];
+    const batch = db.batch();
+    let importados = 0;
+
+    for (const item of items) {
+      // 🚨 FIX: Limpamos o ID para evitar o erro de "documentPath" 🚨
+      // Pegamos no GUID ou no final do link e removemos caracteres ilegais
+      let rawId = item.guid?._ || item.guid || String(item.link || Math.random());
+      const cleanId = rawId.replace(/[^a-zA-Z0-9]/g, "_"); // Substitui tudo o que não é letra/número por _
+
+      const docRef = db.collection("oportunidades_cne").doc(cleanId);
+      
+      batch.set(docRef, {
+        idPost: cleanId,
+        titulo: item.title || "Sem título",
+        descricao: item.description || "Sem descrição",
+        link: item.link || "",
+        coluna: item.category || "Geral",
+        pubDate: item.pubDate || "",
+        ativo: true,
+        lastSync: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      importados++;
+    }
+
+    await batch.commit();
+    return { success: true, message: `${importados} publicações reais sincronizadas do Padlet!` };
+
+  } catch (error) {
+    console.error("Erro na sincronização:", error);
+    throw new HttpsError("internal", "Falha na ligação: " + error.message);
   }
 });

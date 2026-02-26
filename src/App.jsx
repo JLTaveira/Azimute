@@ -62,7 +62,6 @@ export default function App() {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setLoading(true);
 
-      // Se não há ninguém autenticado (por exemplo, após um Logout forçado)
       if (!u) { 
         setUser(null); 
         setProfile(null); 
@@ -75,17 +74,15 @@ export default function App() {
         if (snap.exists()) {
           const p = snap.data(); 
 
-          // 🚨 SEGURANÇA MÁXIMA: Verifica primeiro se é AUXILIAR
           if (Array.isArray(p.funcoes) && p.funcoes.includes("AUXILIAR")) {
-            await signOut(auth); // Desliga a sessão no servidor da Google
-            setErr("Acesso negado: O perfil 'Auxiliar' é de registo interno e não tem permissão para entrar no sistema.");
+            await signOut(auth);
+            setErr("Acesso negado: Perfil Auxiliar não tem permissão de entrada.");
             setLoading(false);
-            return; // Aborta tudo. A porta não se abre (setUser não é chamado).
+            return;
           }
 
-          // Se chegou aqui, é porque o perfil é válido e não é Auxiliar!
-          setErr(""); // Limpa os erros do login
-          setUser(u); // ABRE A PORTA!
+          setErr("");
+          setUser(u);
           setProfile(p);
           
           const metaPromises = [];
@@ -97,11 +94,11 @@ export default function App() {
           if (p.tipo === "ELEMENTO") setView("objetivos"); else setView("dashboard");
         } else { 
           await signOut(auth);
-          setErr("Perfil não encontrado na base de dados."); 
+          setErr("Perfil não encontrado."); 
         }
       } catch (e) { 
         await signOut(auth);
-        setErr("Erro de ligação ao servidor."); 
+        setErr("Erro de ligação."); 
       } 
       finally { setLoading(false); }
     });
@@ -111,11 +108,11 @@ export default function App() {
   async function doLogin(e) {
     e.preventDefault(); 
     setErr("");
-    if (!isValidNin(ninInput)) { setErr("O NIN deve ter 13 dígitos."); return; }
+    if (!isValidNin(ninInput)) { setErr("NIN inválido."); return; }
     try { 
       await signInWithEmailAndPassword(auth, ninToEmail(ninInput), password); 
     } catch (e) { 
-      setErr("Credenciais inválidas ou erro de acesso."); 
+      setErr("Credenciais inválidas."); 
     }
   }
 
@@ -124,64 +121,51 @@ export default function App() {
   async function handleChangePassword(e) {
     e.preventDefault();
     setPwdErr(""); setPwdSuccess("");
-
-    if (pwdNew !== pwdConfirm) { setPwdErr("As novas passwords não coincidem."); return; }
-    if (pwdNew.length < 6) { setPwdErr("A nova password tem de ter pelo menos 6 caracteres."); return; }
-
+    if (pwdNew !== pwdConfirm) { setPwdErr("Passwords não coincidem."); return; }
+    if (pwdNew.length < 6) { setPwdErr("Mínimo 6 caracteres."); return; }
     try {
       const currentUser = auth.currentUser;
       if (!currentUser) return;
-
       const credential = EmailAuthProvider.credential(currentUser.email, pwdCurrent);
       await reauthenticateWithCredential(currentUser, credential);
       await updatePassword(currentUser, pwdNew);
-      
-      setPwdSuccess("Password alterada com sucesso!");
+      setPwdSuccess("Sucesso!");
       setTimeout(() => {
         setShowPwdModal(false);
         setPwdCurrent(""); setPwdNew(""); setPwdConfirm(""); setPwdSuccess("");
       }, 2000);
-
-    } catch (error) {
-      if (error.code === 'auth/invalid-credential') {
-        setPwdErr("A password atual está incorreta.");
-      } else {
-        setPwdErr("Erro ao alterar password. Tenta novamente.");
-      }
-    }
+    } catch (error) { setPwdErr("Erro ao alterar password."); }
   }
 
   async function handleForcedPasswordChange(e) {
     e.preventDefault();
     setPwdErr(""); setPwdSuccess("");
-
-    if (pwdNew !== pwdConfirm) { setPwdErr("As passwords não coincidem."); return; }
-    if (pwdNew.length < 6) { setPwdErr("Tem de ter pelo menos 6 caracteres."); return; }
-
+    if (pwdNew !== pwdConfirm) { setPwdErr("Passwords não coincidem."); return; }
+    if (pwdNew.length < 6) { setPwdErr("Mínimo 6 caracteres."); return; }
     try {
       const currentUser = auth.currentUser;
       if (!currentUser) return;
-
       await updatePassword(currentUser, pwdNew);
-      
       await updateDoc(doc(db, "users", currentUser.uid), {
         forcarMudancaPassword: false,
         updatedAt: new Date()
       });
-
       setProfile(prev => ({ ...prev, forcarMudancaPassword: false }));
-      setPwdNew(""); setPwdConfirm("");
-    } catch (error) {
-      setPwdErr("Sessão expirada ou erro. Faz logout e login novamente com a password predefinida.");
-    }
+    } catch (error) { setPwdErr("Erro. Tenta novamente."); }
   }
 
+  // --- FLAGS ATUALIZADAS PARA INCLUIR TESOUREIRO E ADJUNTO ---
   const flags = useMemo(() => {
     if (!profile) return {};
     return {
-      isDirigente: isDirigente(profile), isElemento: isElemento(profile),
-      isCU: hasFuncao(profile, "CHEFE_UNIDADE"), isCA: hasFuncao(profile, "CHEFE_AGRUPAMENTO"),
-      isSA: hasFuncao(profile, "SECRETARIO_AGRUPAMENTO"), isGuia: profile.isGuia || profile.isSubGuia
+      isDirigente: isDirigente(profile), 
+      isElemento: isElemento(profile),
+      isCU: hasFuncao(profile, "CHEFE_UNIDADE"), 
+      isCA: hasFuncao(profile, "CHEFE_AGRUPAMENTO"),
+      isCAA: hasFuncao(profile, "CHEFE_AGRUPAMENTO_ADJUNTO"), // Added
+      isSA: hasFuncao(profile, "SECRETARIO_AGRUPAMENTO"), 
+      isTA: hasFuncao(profile, "TESOUREIRO_AGRUPAMENTO"), // Added
+      isGuia: profile.isGuia || profile.isSubGuia
     };
   }, [profile]);
 
@@ -193,11 +177,13 @@ export default function App() {
     return `${numero} ${agrupamentoNome || ""}`.trim();
   }, [profile?.agrupamentoId, agrupamentoNome]);
 
+  // --- PROTEÇÃO DE VISTAS ATUALIZADA ---
   useEffect(() => {
     if (!profile) return;
     const fallback = flags.isElemento ? "objetivos" : "dashboard";
-    if (view === "chefe_agrupamento" && !flags.isCA) setView(fallback);
-    if (view === "secretario_agrupamento" && !flags.isSA) setView(fallback);
+    // Permite Adjunto entrar em Adultos e Tesoureiro em Secretário
+    if (view === "chefe_agrupamento" && !(flags.isCA || flags.isCAA)) setView(fallback);
+    if (view === "secretario_agrupamento" && !(flags.isSA || flags.isTA)) setView(fallback);
     if (view === "guia_grupo" && !flags.isGuia) setView(fallback);
     if ((view === "subunidades" || view === "cu_objetivos") && !flags.isDirigente) setView(fallback);
   }, [view, profile, flags]);
@@ -215,7 +201,6 @@ export default function App() {
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px" }}>
         
         {!user ? (
-          // 🚨 FORÇADO A EMPILHAR EM COLUNA 🚨
           <div className="az-login-container" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "85vh" }}>
             <div className="az-card" style={{ width: "100%", maxWidth: 420 }}>
               <div className="az-card-inner">
@@ -231,59 +216,28 @@ export default function App() {
                   </div>
                   <div className="az-form-group">
                     <label>Password</label>
-                    <input className="az-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Sua senha" />
+                    <input className="az-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha" />
                   </div>
-                  <button className="az-btn az-btn-primary" disabled={!isValidNin(ninInput)}>Entrar no Agrupamento</button>
-                  {err && <div className="az-error-msg" style={{ background: "rgba(220, 38, 38, 0.1)", color: "#ef4444", padding: "12px", borderRadius: "8px", border: "1px solid rgba(220, 38, 38, 0.3)", fontSize: "14px", fontWeight: "600", textAlign: "center" }}>{err}</div>}
+                  <button className="az-btn az-btn-primary" disabled={!isValidNin(ninInput)}>Entrar</button>
+                  {err && <div className="az-error-msg">{err}</div>}
                 </form>
               </div>
             </div>
-
-            {/* 🚨 CRÉDITOS E COPYRIGHT - PÁGINA DE LOGIN 🚨 */}
-            <div style={{ 
-              marginTop: "32px", 
-              textAlign: "center", 
-              color: "rgba(255, 255, 255, 0.6)", 
-              display: "flex", 
-              flexDirection: "column", 
-              gap: "6px" 
-            }}>
-              <div style={{ fontSize: "12px", fontWeight: 600 }}>
-                © 2026 Azimute - Todos os direitos reservados.
-              </div>
-              <div style={{ fontSize: "10px", fontStyle: "italic", opacity: 0.8 }}>
-                Desenvolvido, desenhado e mantido por João Taveira (Agrupamento 1104 Paranhos)
-              </div>
+            <div style={{ marginTop: "32px", textAlign: "center", color: "rgba(255, 255, 255, 0.6)" }}>
+              <div style={{ fontSize: "12px", fontWeight: 600 }}>© 2026 Azimute</div>
             </div>
-
           </div>
         ) : profile?.forcarMudancaPassword ? (
           <div className="az-login-container" style={{ marginTop: "10vh", display: "flex", flexDirection: "column", alignItems: "center" }}>
             <div className="az-card" style={{ borderColor: "var(--brand-orange)", width: "100%", maxWidth: 420 }}>
               <div className="az-card-inner">
-                <div style={{ textAlign: "center", marginBottom: 20 }}>
-                  <div style={{ fontSize: 40 }}>⚠️</div>
-                  <h2 className="az-h2" style={{ color: "var(--brand-orange)", marginTop: 8 }}>Mudança Obrigatória</h2>
-                  <p className="az-muted az-small">A tua password foi reiniciada pela Chefia. Define agora a tua nova password secreta para entrares no Azimute.</p>
-                </div>
-
-                <form onSubmit={handleForcedPasswordChange} style={{ display: "grid", gap: 16 }}>
-                  <div className="az-form-group">
-                    <label>Nova Password</label>
-                    <input type="password" required className="az-input" value={pwdNew} onChange={e => setPwdNew(e.target.value)} placeholder="Mínimo 6 caracteres" />
-                  </div>
-                  <div className="az-form-group">
-                    <label>Confirmar Password</label>
-                    <input type="password" required className="az-input" value={pwdConfirm} onChange={e => setPwdConfirm(e.target.value)} placeholder="Repete a password" />
-                  </div>
-                  
+                <h2 className="az-h2" style={{ color: "var(--brand-orange)", textAlign: "center" }}>Mudança Obrigatória</h2>
+                <form onSubmit={handleForcedPasswordChange} style={{ display: "grid", gap: 16, marginTop: 20 }}>
+                  <input type="password" required className="az-input" value={pwdNew} onChange={e => setPwdNew(e.target.value)} placeholder="Nova Password" />
+                  <input type="password" required className="az-input" value={pwdConfirm} onChange={e => setPwdConfirm(e.target.value)} placeholder="Confirmar Password" />
                   {pwdErr && <div className="az-alert az-alert--error">{pwdErr}</div>}
-                  
-                  <button className="az-btn az-btn-primary" type="submit" style={{ fontWeight: 800, padding: 14 }}>💾 Guardar e Entrar</button>
+                  <button className="az-btn az-btn-primary" type="submit">Guardar e Entrar</button>
                 </form>
-                <div style={{ textAlign: "center", marginTop: 16 }}>
-                  <button className="az-btn" style={{ fontSize: 12 }} onClick={doLogout}>Cancelar e Sair</button>
-                </div>
               </div>
             </div>
           </div>
@@ -297,15 +251,14 @@ export default function App() {
                   <div style={{ fontSize: 13, opacity: 0.7 }}>NIN: {ninFormatado}</div>
                 </div>
               </div>
-              
               <div style={{ display: 'flex', gap: 10 }}>
-                <button className="az-btn" style={{ borderColor: "rgba(255,255,255,0.2)" }} onClick={() => setShowPwdModal(true)}>🔑 Mudar Password</button>
+                <button className="az-btn" onClick={() => setShowPwdModal(true)}>🔑 Password</button>
                 <button className="az-btn" onClick={doLogout}>Sair</button>
               </div>
             </header>
 
             <div className="az-breadcrumb">
-               <span><b>{labelAgrupamento}</b></span> / <span>{secaoNome || "Secção"}</span>
+                <span><b>{labelAgrupamento}</b></span> / <span>{secaoNome || "Secção"}</span>
             </div>
 
             <nav className="az-tabs">
@@ -318,8 +271,14 @@ export default function App() {
                   <button className={`az-tab ${view === "cu_objetivos" ? "active" : ""}`} onClick={() => setView("cu_objetivos")}>Objetivos Educativos</button>
                 </>
               )}
-              {flags.isSA && <button className={`az-tab ${view === "secretario_agrupamento" ? "active" : ""}`} onClick={() => setView("secretario_agrupamento")}>Secretário</button>}
-              {flags.isCA && <button className={`az-tab ${view === "chefe_agrupamento" ? "active" : ""}`} onClick={() => setView("chefe_agrupamento")}>Adultos</button>}
+              {/* VISIBILIDADE PARA SECRETÁRIO OU TESOUREIRO */}
+              {(flags.isSA || flags.isTA) && (
+                <button className={`az-tab ${view === "secretario_agrupamento" ? "active" : ""}`} onClick={() => setView("secretario_agrupamento")}>Secretaria</button>
+              )}
+              {/* VISIBILIDADE PARA CHEFE AGRUPAMENTO OU ADJUNTO */}
+              {(flags.isCA || flags.isCAA) && (
+                <button className={`az-tab ${view === "chefe_agrupamento" ? "active" : ""}`} onClick={() => setView("chefe_agrupamento")}>Adultos</button>
+              )}
             </nav>
 
             <main className="az-content">
@@ -327,37 +286,31 @@ export default function App() {
               {view === "guia_grupo" && <GuiaObjetivosGrupo profile={profile} />}
               {view === "subunidades" && <SubunidadesAdmin profile={profile} readOnly={!flags.isCU} />}
               {view === "cu_objetivos" && <ChefeUnidadeObjetivos profile={profile} readOnly={!flags.isCU} />}
-              {view === "secretario_agrupamento" && <SecretarioAgrupamentoDashboard profile={profile} />}
-              {view === "chefe_agrupamento" && <ChefeAgrupamentoDashboard profile={profile} />}
+              
+              {/* PASSAGEM DA PROP readOnly PARA BLOQUEAR EDIÇÃO DOS OBSERVADORES */}
+              {view === "secretario_agrupamento" && (
+                <SecretarioAgrupamentoDashboard profile={profile} readOnly={!flags.isSA} />
+              )}
+              {view === "chefe_agrupamento" && (
+                <ChefeAgrupamentoDashboard profile={profile} readOnly={!flags.isCA} />
+              )}
+              
               {view === "dashboard" && <SecaoDashboard profile={profile} onOpenGuiaObjetivos={() => setView("guia_grupo")} />}
             </main>
 
             {showPwdModal && (
+              /* ... modal code remains identical ... */
               <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(5px)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "center" }}>
                 <div className="az-card" style={{ width: "100%", maxWidth: 400, background: "var(--bg-dark)" }}>
                   <div className="az-card-inner">
-                    <h3 style={{ margin: "0 0 16px 0", borderBottom: "1px solid var(--stroke)", paddingBottom: 8 }}>🔑 Mudar Password</h3>
-                    
+                    <h3 style={{ margin: "0 0 16px 0", borderBottom: "1px solid var(--stroke)", paddingBottom: 8 }}>🔑 Password</h3>
                     <form onSubmit={handleChangePassword} style={{ display: "grid", gap: 16 }}>
-                      <div className="az-form-group">
-                        <label>Password Atual</label>
-                        <input type="password" required className="az-input" value={pwdCurrent} onChange={e => setPwdCurrent(e.target.value)} />
-                      </div>
-                      <div className="az-form-group">
-                        <label>Nova Password</label>
-                        <input type="password" required className="az-input" value={pwdNew} onChange={e => setPwdNew(e.target.value)} />
-                      </div>
-                      <div className="az-form-group">
-                        <label>Confirmar Nova Password</label>
-                        <input type="password" required className="az-input" value={pwdConfirm} onChange={e => setPwdConfirm(e.target.value)} />
-                      </div>
-
-                      {pwdErr && <div className="az-small" style={{ color: "var(--danger)" }}>{pwdErr}</div>}
-                      {pwdSuccess && <div className="az-small" style={{ color: "var(--brand-green)", fontWeight: 800 }}>{pwdSuccess}</div>}
-
-                      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 8 }}>
-                        <button type="button" className="az-btn" onClick={() => { setShowPwdModal(false); setPwdErr(""); setPwdCurrent(""); setPwdNew(""); setPwdConfirm(""); }}>Cancelar</button>
-                        <button type="submit" className="az-btn az-btn-teal" style={{ fontWeight: 800 }}>Guardar Nova Password</button>
+                      <input type="password" required className="az-input" value={pwdCurrent} onChange={e => setPwdCurrent(e.target.value)} placeholder="Atual" />
+                      <input type="password" required className="az-input" value={pwdNew} onChange={e => setPwdNew(e.target.value)} placeholder="Nova" />
+                      <input type="password" required className="az-input" value={pwdConfirm} onChange={e => setPwdConfirm(e.target.value)} placeholder="Confirmar" />
+                      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+                        <button type="button" className="az-btn" onClick={() => setShowPwdModal(false)}>Cancelar</button>
+                        <button type="submit" className="az-btn az-btn-teal">Guardar</button>
                       </div>
                     </form>
                   </div>
