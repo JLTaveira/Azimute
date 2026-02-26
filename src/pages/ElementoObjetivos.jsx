@@ -37,7 +37,7 @@ export default function ElementoObjetivos({ profile }) {
   const [mostrarTudo, setMostrarTudo] = useState(false);
   const [activeArea, setActiveArea] = useState("FISICO");
   const [draftSet, setDraftSet] = useState(() => new Set());
-  onst [cicloMeta, setCicloMeta] = useState(null);
+  const [cicloMeta, setCicloMeta] = useState(null);
 
   const uid = auth.currentUser?.uid;
   const secao = secaoFromSecaoDocId(profile?.secaoDocId);
