@@ -3,78 +3,124 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function signedIn() { return request.auth != null; }
-    function me() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
-    function meExists() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
-    function hasFuncao(f) { return meExists() && (f in me().funcoes); }
+    // ==========================================
+    // HELPERS BÁSICOS
+    // ==========================================
+    function signedIn() {
+      return request.auth != null;
+    }
 
-    // DEFINIÇÃO DE CARGOS
+    function me() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function meExists() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+   function hasFuncao(f) { 
+  return meExists() && me().funcoes.hasAny([f]); 
+  }
+
     function isChefeAgrupamento() { return hasFuncao("CHEFE_AGRUPAMENTO"); }
-    function isAdjuntoAgrupamento() { return hasFuncao("CHEFE_AGRUPAMENTO_ADJUNTO"); }
     function isSecretarioAgrupamento() { return hasFuncao("SECRETARIO_AGRUPAMENTO"); }
-    function isTesoureiro() { return hasFuncao("TESOUREIRO_AGRUPAMENTO"); }
     function isChefeUnidade() { return hasFuncao("CHEFE_UNIDADE"); }
-
-    // Grupo de Direção (Leitura Total)
-    function isDirecao() {
-      return isChefeAgrupamento() || isAdjuntoAgrupamento() || isSecretarioAgrupamento() || isTesoureiro() || isChefeUnidade();
+    function isDirigente() { return meExists() && me().tipo == "DIRIGENTE"; }
+    function isGuiaOuSubGuia() {
+      return meExists() && me().tipo == "ELEMENTO" && (me().isGuia == true || me().isSubGuia == true);
     }
 
     function sameAgrupamento(targetData) {
       return meExists() && targetData.agrupamentoId == me().agrupamentoId;
     }
 
-    // --- REGRAS DE ESTRUTURA ---
-    match /agrupamento/{agrupamentoId} {
-      // Toda a Direção lê a estrutura do Agrupamento
-      allow read: if signedIn() && me().agrupamentoId == agrupamentoId;
+    function sameSecao(targetData) {
+      return sameAgrupamento(targetData) && targetData.secaoDocId == me().secaoDocId;
+    }
 
+    function sameSubunidade(targetData) {
+      return sameSecao(targetData) 
+        && targetData.patrulhaId != null 
+        && targetData.patrulhaId == me().patrulhaId;
+    }
+
+    // ==========================================
+    // COLEÇÃO: USERS
+    // ==========================================
+    match /users/{uid} {
+      
+      // 🚨 ALTERAÇÃO CRÍTICA: Permite pesquisa global por NIN para transferências
+      allow read: if signedIn();
+
+      allow update: if signedIn() && (
+        (request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt', 'forcarMudancaPassword']))
+        || (isChefeUnidade() && sameSecao(resource.data) && resource.data.ativo != false && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['patrulhaId', 'etapaProgresso', 'isGuia', 'isSubGuia', 'totem', 'updatedAt']))
+        || (isChefeAgrupamento() && sameAgrupamento(resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['secaoDocId', 'tipo', 'funcoes', 'totem', 'updatedAt']))
+      );
+
+      match /objetivos/{oid} {
+        allow read: if signedIn() && (request.auth.uid == uid || isChefeAgrupamento() || isDirigente() || isGuiaOuSubGuia());
+        allow create: if signedIn() && (request.auth.uid == uid || isChefeUnidade());
+        allow delete: if signedIn() && (request.auth.uid == uid || isChefeUnidade());
+        allow update: if signedIn() && (isGuiaOuSubGuia() || isChefeUnidade());
+      }
+
+      match /meta/{docId} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
+    }
+
+    // ==========================================
+    // COLEÇÃO: NOTIFICAÇÕES (ORDEM DE SERVIÇO)
+    // ==========================================
+    match /notificacoes/{nid} {
+      allow read: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento()) && resource.data.agrupamentoId == me().agrupamentoId;
+      
+      // 🚨 PERMITE À SECRETARIA CRIAR NOTIFICAÇÕES DE "SAIU/VOLTOU AO ATIVO"
+      allow create: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento() || isDirigente() || isChefeUnidade());
+
+      allow update: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento())
+        && sameAgrupamento(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['resolvida', 'resolvidaAt', 'resolvidaPorUid']);
+    }
+
+    match /agrupamento/{agrupamentoId} {
+      allow read: if signedIn() && me().agrupamentoId == agrupamentoId;
       match /secoes/{secaoId} {
         allow read: if signedIn() && me().agrupamentoId == agrupamentoId;
-        // Escrita permitida se for Chefe desta Secção OU Chefe de Agrupamento
-        allow write: if signedIn() && (
-          isChefeAgrupamento() || 
-          (isChefeUnidade() && me().secaoDocId == secaoId)
-        );
-
+        allow write: if signedIn() && isChefeUnidade() && me().secaoDocId == secaoId;
         match /subunidades/{sid} {
           allow read: if signedIn() && me().agrupamentoId == agrupamentoId;
-          allow write: if signedIn() && (
-            isChefeAgrupamento() || 
-            (isChefeUnidade() && me().secaoDocId == secaoId)
-          );
+          allow write: if signedIn() && isChefeUnidade() && me().secaoDocId == secaoId;
         }
       }
     }
 
-    match /users/{uid} {
+    match /catalogoObjetivos/{document=**} {
       allow read: if signedIn();
-      allow update: if signedIn() && (
-        (request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt', 'forcarMudancaPassword']))
-        || (isChefeUnidade() && me().secaoDocId == resource.data.secaoDocId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['patrulhaId', 'etapaProgresso', 'isGuia', 'isSubGuia', 'totem', 'updatedAt']))
-        || (isChefeAgrupamento() && sameAgrupamento(resource.data))
-      );
-      
-      match /arquivados/{docId} { allow read, write: if request.auth.uid == uid; }
+    }
+  
+    // ==========================================
+    // COLEÇÃO: OPORTUNIDADES (OBJETIVOS NACIONAIS E AGRUPAMENTO)
+    // ==========================================
+
+    // Objetivos Nacionais (Sincronizados via XML pelo Secretário)
+    match /oportunidades_cne/{id} {
+      allow read: if signedIn();
+      allow write: if signedIn() && isSecretarioAgrupamento();
     }
 
-    match /notificacoes/{nid} {
-      allow read: if signedIn() && isDirecao() && resource.data.agrupamentoId == me().agrupamentoId;
-      allow create: if signedIn() && (isDirecao() || me().tipo == "DIRIGENTE");
-      // Apenas cargos executivos confirmam OS
-      allow update: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento()) && sameAgrupamento(resource.data);
-    }
-
-    // Regras de Oportunidades (SA, CA e CU escrevem e arquivam)
+    // Oportunidades criadas pelo próprio Agrupamento
     match /oportunidades_agrupamento/{id} {
-      allow read: if signedIn();
+      allow read: if signedIn() && sameAgrupamento(resource.data);
+      // SA, CA e CU podem gerir as oportunidades locais
       allow write: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento() || isChefeUnidade());
     }
+
+    // Oportunidades Ocultas ou Arquivadas
     match /oportunidades_ocultas/{id} {
-      allow read, write: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento());
+      allow read: if signedIn() && sameAgrupamento(resource.data);
+      allow write: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento() || isChefeUnidade());
     }
-    
-    match /oportunidades_cne/{id} { allow read: if signedIn(); }
-    match /catalogoObjetivos/{document=**} { allow read: if signedIn(); }
-  }
+  } 
 }

@@ -1,7 +1,7 @@
 /* Chefe Unidade Objetivos
     ./src/pages/ChefeUnidadeObjetivos.jsx
   2026-02-20 - Joao Taveira (jltaveira@gmail.com)
-  2026-02-26 integração dos objectivos
+  2026-02-26 recuperação de ficheiro que estava perdido e integração dos objectivos pedagógicos nacionais
  */
 
 import { useEffect, useState, useMemo, Fragment } from "react";

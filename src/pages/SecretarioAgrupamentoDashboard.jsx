@@ -83,10 +83,55 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
   const [importing, setImporting] = useState(false);
   const [resettingUid, setResettingUid] = useState(null);
 
+  /*
   useEffect(() => {
     if (!profile?.agrupamentoId) return;
     fetchDadosSecretaria();
+  }, [profile]); 
+  */
+  
+  useEffect(() => {
+    // 🚨 LOG 0: Verificação imediata
+    console.log("useEffect disparou! Profile existe?", !!profile);
+    console.log("ID Agrupamento:", profile?.agrupamentoId);
+    console.log("Funções do utilizador:", profile?.funcoes);
+
+    if (!profile?.agrupamentoId) {
+      console.log("⚠️ Abortado: agrupamentoId está em falta.");
+      return;
+    }
+
+    async function fetchData() {
+      console.log("🚀 A iniciar fetchData..."); // LOG 1
+      setLoading(true);
+      try {
+        const qCNE = query(collection(db, "oportunidades_cne"));
+        const snapCNE = await getDocs(qCNE);
+        console.log("📦 Documentos na coleção CNE:", snapCNE.size); // LOG 2
+
+        const listaCNE = snapCNE.docs.map(d => ({ id: d.id, ...d.data() }));
+        
+        const qOcultas = query(
+          collection(db, "oportunidades_ocultas"), 
+          where("agrupamentoId", "==", profile.agrupamentoId)
+        );
+        const snapOcultas = await getDocs(qOcultas);
+        const idsOcultos = snapOcultas.docs.map(d => d.data().oportunidadeId || d.id);
+
+        setOportunidadesCNE(listaCNE);
+        setOcultosAgrupamento(idsOcultos);
+        
+        console.log("✅ Dados processados e estados atualizados."); // LOG 3
+      } catch (error) {
+        console.error("❌ ERRO NO FIREBASE:", error.code, error.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchData();
   }, [profile]);
+
 
   const oportunidadesVisiveis = useMemo(() => {
     return oportunidadesCNE.filter(op => 
@@ -209,7 +254,7 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
     } catch (error) { alert("Erro ao distribuir."); }
   }
 
-  // --- FUNÇÕES DE GESTÃO (Originais) ---
+  // --- FUNÇÕES DE GESTÃO ---
   async function handleResolver(id) {
     if (readOnly) return;
     if (!window.confirm(`Confirmas que esta alteração já foi incluída em Ordem de Serviço e/ou no SIIE?`)) return;
@@ -343,7 +388,7 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
   }, [notificacoes, filtro]);
   
   const contagemPendentes = notificacoes.filter(n => !n.resolvida).length;
-
+  
   return (
     <div className="az-grid" style={{ gap: 24 }}>
       {/* HEADER (Original) */}
@@ -366,7 +411,7 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
         <button className={`az-tab ${filtro === "PADLET" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PADLET")}>🌐 Oportunidades (CNE)</button>
       </div>
 
-      {/* ABA: PENDENTES E RESOLVIDAS (Versão Original Restaurada) */}
+      {/* ABA: PENDENTES E RESOLVIDAS */}
       {(filtro === "PENDENTES" || filtro === "RESOLVIDAS") && (
         <div className="az-card">
           <div className="az-card-inner" style={{ padding: "0" }}>
@@ -418,7 +463,7 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
         </div>
       )}
 
-      {/* ABA: PADLET (Versão Nova Melhorada) */}
+      {/* ABA: PADLET */}
       {filtro === "PADLET" && (
         <div className="az-card">
           <div className="az-card-inner">
