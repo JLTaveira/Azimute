@@ -1,11 +1,14 @@
 /* Pagina de gestão do Chefe de Agrupamento
   src/pages/ChefeAgrupamentoDashboard.jsx
- 2026-02-18 - Joao Taveira (jltaveira@gmail.com) */
+ 2026-02-18 - Joao Taveira (jltaveira@gmail.com) 
+ 2026-02-27 - mural de oportunidades
+ */
 
 
 import { useEffect, useState, useMemo } from "react";
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
+import MuralOportunidades from "../components/MuralOportunidades";
 
 // IMPORT DA IMAGEM CA
 import caImg from "../assets/ca.png";
@@ -159,6 +162,7 @@ export default function ChefeAgrupamentoDashboard({ profile }) {
       <div className="az-tabs">
         <button className={`az-tab ${tabAtual === "RADAR" ? "az-tab--active" : ""}`} onClick={() => setTabAtual("RADAR")}>📊 Radar Pedagógico</button>
         <button className={`az-tab ${tabAtual === "DIRIGENTES" ? "az-tab--active" : ""}`} onClick={() => setTabAtual("DIRIGENTES")}>👥 Dirigentes ({dirigentes.length})</button>
+        <button className={`az-tab ${tabAtual === "MURAL" ? "az-tab--active" : ""}`} onClick={() => setTabAtual("MURAL")}>📢 Comunicações</button>
       </div>
 
       {tabAtual === "RADAR" && (
@@ -260,6 +264,13 @@ export default function ChefeAgrupamentoDashboard({ profile }) {
           </div>
         </div>
       )}
+
+      {tabAtual === "MURAL" && (
+        <div className="animate-fade-in">
+          <MuralOportunidades profile={profile} />
+        </div>
+      )}
+
     </div>
   );
 }
