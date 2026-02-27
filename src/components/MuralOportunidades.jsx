@@ -15,30 +15,34 @@ export default function MuralOportunidades({ profile, onDistribute }) {
   // Calcula quais as tags que este utilizador "escuta" com base na sua função
   const minhasTags = useMemo(() => {
     if (!profile?.funcoes) return [];
-    const tags = ["GERAL"]; // Todos ouvem o que é Geral
-    
+    const tags = ["GERAL"];
     const f = profile.funcoes;
-    // Se pertence à Direção (conforme clarificaste), ouve a tag DIRECAO
-    if (f.includes("CHEFE_AGRUPAMENTO") || f.includes("CHEFE_AGRUPAMENTO_ADJUNTO") || 
-        f.includes("SECRETARIO_AGRUPAMENTO") || f.includes("TESOUREIRO_AGRUPAMENTO") || 
-        f.includes("CHEFE_UNIDADE")) {
+    const s = String(profile.secaoDocId || "").toUpperCase(); // Ex: "1104_EXPEDICAO"
+
+    // 1. Tags de Direção (SA, CA, CU, etc)
+    if (f.includes("CHEFE_AGRUPAMENTO") || f.includes("SECRETARIO_AGRUPAMENTO") || f.includes("CHEFE_UNIDADE")) {
       tags.push("DIRECAO");
     }
 
-    // Tags específicas por Cargo
-    if (f.includes("CHEFE_AGRUPAMENTO")) tags.push("CHEFE_AGRUPAMENTO");
-    if (f.includes("TESOUREIRO_AGRUPAMENTO")) tags.push("TESOUREIRO");
+    // 2. Tags de Secção
+    if (s) {
+      // Todos na secção ouvem a tag base (ex: "EXPLORADORES")
+      tags.push(s); 
 
-    // Tags por Secção (para Chefes de Unidade e elementos)
-    const s = String(profile.secaoDocId || "").toLowerCase();
-    if (s.includes("alcateia")) tags.push("LOBITOS");
-    if (s.includes("expedicao")) tags.push("EXPLORADORES");
-    if (s.includes("comunidade")) tags.push("PIONEIROS");
-    if (s.includes("cla")) tags.push("CAMINHEIROS");
+      // Apenas Dirigentes da secção ouvem esta tag
+      if (profile.tipo === "DIRIGENTE") {
+        tags.push(`${s}_DIRIGENTES`);
+      }
+
+      // Apenas Guias e Sub-Guias ouvem esta tag
+      if (profile.isGuia || profile.isSubGuia) {
+        tags.push(`${s}_GUIAS`);
+      }
+    }
 
     return tags;
   }, [profile]);
-
+  
   useEffect(() => {
     if (profile?.agrupamentoId && minhasTags.length > 0) fetchMural();
   }, [profile, minhasTags]);
