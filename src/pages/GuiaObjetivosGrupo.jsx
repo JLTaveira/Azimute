@@ -1,13 +1,13 @@
-/* Grelha do Guia:
-Guia/Sub-Guia aqui só consegue fazer VALIDADO e REALIZADO (compatível com as rules que escreveste).
-Se o objetivo estiver DISPONÍVEL, aparece “ainda não foi proposto” (guia não cria nada).
-src/pages/GuiaObjetivosGrupo.jsx
- 2026-02-20 - Joao Taveira (jltaveira@gmail.com) */
-
+/* Guia/Sub-Guia
+  src/pages/GuiaObjetivosGrupo.jsx
+  2026-02-20 - Joao Taveira (jltaveira@gmail.com) 
+  2026-02-27 - MuralOportunidades
+ */
 
 import { useEffect, useState, useMemo } from "react";
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
+import MuralOportunidades from "../components/MuralOportunidades";
 
 const AREA_META = {
   FISICO: { nome: "Físico", bg: "#16a34a", text: "#ffffff" },
@@ -48,6 +48,9 @@ function descricaoDoCatalogo(o) {
 }
 
 export default function GuiaObjetivosGrupo({ profile }) {
+  const [tabAtual, setTabAtual] = useState("VALIDAR");
+  const [oportunidades, setOportunidades] = useState([]); 
+  const [oportunidadesArquivadas, setOportunidadesArquivadas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
   const [elementos, setElementos] = useState([]);
@@ -65,18 +68,15 @@ export default function GuiaObjetivosGrupo({ profile }) {
         // 1. Vai buscar o Catálogo da Secção para sabermos os Títulos e Cores
         const qCat = query(collection(db, "catalogoObjetivos"), where("secao", "==", secaoBase));
         const snapCat = await getDocs(qCat);
-        const cat = snapCat.docs.map(d => {
-          const data = d.data();
-          return { 
-            id: d.id, 
-            _areaKey: areaToKey(data.areaDesenvolvimento || data.area), 
-            _trilho: data.trilhoEducativo || data.trilho || "Geral", 
-            _codigo: data.codigo || extrairCodigoFromOid(d.id), 
-            _titulo: descricaoDoCatalogo(data), 
-            ...data 
-          };
-        });
-        setCatalogo(cat);
+        const cat = snapCat.docs.map(d => ({ 
+        id: d.id, 
+        _areaKey: areaToKey(d.data().areaDesenvolvimento || d.data().area), 
+        _trilho: d.data().trilhoEducativo || d.data().trilho || "Geral", 
+        _codigo: d.data().codigo || extrairCodigoFromOid(d.id), 
+        _titulo: descricaoDoCatalogo(d.data()), 
+        ...d.data() 
+      }));
+      setCatalogo(cat);
 
         // 2. Vai buscar os Elementos da mesma Patrulha/Bando
         const qUsers = query(
@@ -87,14 +87,10 @@ export default function GuiaObjetivosGrupo({ profile }) {
           where("tipo", "==", "ELEMENTO")
         );
         const snapUsers = await getDocs(qUsers);
-        const listaElementos = [];
-        snapUsers.forEach(d => {
-          // 🚨 FILTRO AQUI: Excluímos o próprio Guia E os elementos inativos
-          if (d.id !== profile.uid && d.data().ativo !== false) {
-            listaElementos.push({ uid: d.id, ...d.data() });
-          }
-        });
-        setElementos(listaElementos.sort((a,b) => String(a.nome).localeCompare(String(b.nome))));
+        const listaElementos = snapUsers.docs
+        .map(d => ({ uid: d.id, ...d.data() }))
+        .filter(u => u.uid !== profile.uid && u.ativo !== false);
+      setElementos(listaElementos.sort((a,b) => a.nome.localeCompare(b.nome)));
 
         // 3. Vai buscar apenas os Objetivos que estão em "ESCOLHA" (A aguardar validação)
         const todosObjetivos = [];
@@ -108,7 +104,45 @@ export default function GuiaObjetivosGrupo({ profile }) {
         );
         setObjetivos(todosObjetivos);
 
+        // 4. Vai buscar as Oportunidades Educativas enviadas pelo Chefe para esta Secção //
+        const [snapCne, snapAgrup] = await Promise.all([
+        getDocs(query(collection(db, "oportunidades_cne"))),
+        getDocs(query(collection(db, "oportunidades_agrupamento"), 
+                where("agrupamentoId", "==", profile.agrupamentoId)))
+      ]);
+
+      const todas = [
+        ...snapCne.docs.map(d => ({ id: d.id, ...d.data(), tipo: 'CNE' })),
+        ...snapAgrup.docs.map(d => ({ id: d.id, ...d.data(), tipo: 'LOCAL' }))
+      ];
+
+        const opsFiltradas = todas.filter(o => {
+        // Normalizamos os campos da base de dados
+        const pSecaoDoc = o.secaoDocId; // ID específico da Unidade (ex: Clã 115)
+        const pSecaoNome = String(o.secao || "").toUpperCase(); // Nome da Secção (ex: LOBITOS)
+        const pColuna = String(o.coluna || "").toUpperCase();
+
+        // CONDIÇÃO ESTRITA:
+        // 1. Foi enviado especificamente para a tua Unidade (Clã/Patrulha/Bando)
+        if (pSecaoDoc === profile.secaoDocId) return true;
+
+        // 2. Foi enviado para a tua Secção (dinâmico: LOBITOS, EXPLORADORES, etc.)
+        // mas APENAS se não for uma mensagem de âmbito geral de Agrupamento
+        const eParaMinhaSecao = (pSecaoNome === secaoBase) || pColuna.includes(secaoBase);
+        
+        // Se for para a tua secção e tiver um alvo definido, o Guia vê.
+        // Se for "GERAL", o filtro ignora (consultas como elemento noutra tab).
+        return (
+          o.secaoDocId === profile.secaoDocId && 
+          o.destinatarios === "GUIAS"
+        );
+      });
+      
+      setOportunidades(opsFiltradas.filter(o => !o.arquivada));
+      setOportunidadesArquivadas(opsFiltradas.filter(o => o.arquivada));
+
       } catch (err) {
+        console.error("Erro detalhado:", err);
         setErro("Erro ao carregar os dados da patrulha.");
       } finally {
         setLoading(false);
@@ -159,64 +193,147 @@ export default function GuiaObjetivosGrupo({ profile }) {
   });
 
   return (
-    <div className="az-grid" style={{ gap: 24 }}>
-      <div className="az-card">
-        <div className="az-card-inner">
-          <h2 className="az-h2" style={{ display: "flex", alignItems: "center", gap: 10 }}>⚜️ Conselho de Guias Digital</h2>
-          <p className="az-muted az-small" style={{ marginTop: 4 }}>
-            Valida os objetivos que os teus elementos propuseram. Ao aprovares, eles seguirão para o Chefe de Unidade.
-          </p>
-        </div>
-      </div>
 
-      {Object.keys(grouped).length === 0 ? (
-        <div className="az-panel" style={{ textAlign: "center", padding: "40px" }}>
-          <div style={{ fontSize: 40, opacity: 0.5 }}>✅</div>
-          <p className="az-muted" style={{ marginTop: 12 }}>Tudo em dia! Não há objetivos propostos na tua unidade a aguardar validação.</p>
-        </div>
-      ) : (
-        Object.values(grouped).map(group => (
-          <div key={group.nome} className="az-card">
-            <div className="az-card-inner">
-              <h3 style={{ margin: "0 0 16px 0", color: "var(--brand-teal)", display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid var(--stroke)", paddingBottom: 8 }}>
-                👤 {group.nome}
-              </h3>
-              
-              <div className="az-grid" style={{ gap: 12 }}>
-                {group.objs.map(obj => (
-                  <div key={obj.docId} className="az-panel az-panel-sm" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                    
-                    {/* Badge da Área (Colorido) */}
-                    <span className="az-area-badge" style={{ background: AREA_META[obj._areaKey]?.bg || "#333", color: AREA_META[obj._areaKey]?.text || "#fff" }}>
-                      {obj._codigo || "?"}
-                    </span>
-                    
-                    {/* Título e Trilho */}
-                    <div style={{ flex: 1, minWidth: 200 }}>
-                      <div style={{ fontWeight: 700, color: "var(--panel-text)" }}>{obj._titulo || "Objetivo sem título"}</div>
-                      <div className="az-small muted">
-                        Trilho: {obj._trilho || "Geral"} • Área: {AREA_META[obj._areaKey]?.nome || "Outra"}
+  <div className="az-page-container">
+      <div className="az-tabs-container" style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
+      
+      <button 
+        onClick={() => setTabAtual("VALIDAR")}
+        className={`az-tab-pill ${tabAtual === "VALIDAR" ? "active" : ""}`}
+        style={{
+          padding: "6px 16px",
+          borderRadius: "20px",
+          border: tabAtual === "VALIDAR" ? "1px solid var(--brand-teal)" : "1px solid transparent",
+          background: tabAtual === "VALIDAR" ? "rgba(0, 150, 136, 0.1)" : "transparent",
+          color: tabAtual === "VALIDAR" ? "#fff" : "var(--text-muted)",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: "14px"
+        }}
+      >
+        🎯 Validar Propostas
+      </button>
+
+      <button 
+        onClick={() => setTabAtual("OPORTUNIDADES")}
+        className={`az-tab-pill ${tabAtual === "OPORTUNIDADES" ? "active" : ""}`}
+        style={{
+          padding: "6px 16px",
+          borderRadius: "20px",
+          border: tabAtual === "OPORTUNIDADES" ? "1px solid var(--brand-teal)" : "1px solid transparent",
+          background: tabAtual === "OPORTUNIDADES" ? "rgba(0, 150, 136, 0.1)" : "transparent",
+          color: tabAtual === "OPORTUNIDADES" ? "#fff" : "var(--text-muted)",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: "14px"
+        }}
+      >
+        📢 Oportunidades Educativas
+      </button>
+
+    </div>
+
+    {/* 2. Conteúdo Condicional */}
+    {tabAtual === "VALIDAR" && (
+      <div className="animate-fade-in">
+        {Object.keys(grouped).length === 0 ? (
+          <div className="az-panel" style={{ textAlign: "center", padding: "60px 20px", background: "rgba(255,255,255,0.05)", borderRadius: "12px" }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>✅</div>
+            <p style={{ color: "var(--text-muted)", fontSize: "1.1rem" }}>
+              Tudo em dia! Não há objetivos propostos na tua unidade a aguardar validação.
+            </p>
+          </div>
+        ) : (
+          Object.values(grouped).map(group => (
+            <div key={group.nome} className="az-card" style={{ marginBottom: 16 }}>
+              <div className="az-card-inner">
+                <h3 style={{ margin: "0 0 16px 0", color: "var(--brand-teal)", display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid var(--stroke)", paddingBottom: 8 }}>
+                  👤 {group.nome}
+                </h3>
+                
+                <div className="az-grid" style={{ display: "grid", gap: 12 }}>
+                  {group.objs.map(obj => (
+                    <div key={obj.docId} className="az-panel az-panel-sm" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "12px", border: "1px solid var(--stroke)", borderRadius: 8 }}>
+                      
+                      <span className="az-area-badge" style={{ background: AREA_META[obj._areaKey]?.bg || "#333", color: AREA_META[obj._areaKey]?.text || "#fff", padding: "4px 8px", borderRadius: 4, fontSize: "11px", fontWeight: 700 }}>
+                        {obj._codigo || "?"}
+                      </span>
+                      
+                      <div style={{ flex: 1, minWidth: 200 }}>
+                        <div style={{ fontWeight: 700, color: "var(--panel-text)" }}>{obj._titulo || "Objetivo sem título"}</div>
+                        <div className="az-small" style={{ opacity: 0.7, fontSize: "12px" }}>
+                          Trilho: {obj._trilho || "Geral"} • Área: {AREA_META[obj._areaKey]?.nome || "Outra"}
+                        </div>
                       </div>
-                    </div>
-                    
-                    {/* Botão Validar */}
-                    <div>
+                      
                       <button 
                         className="az-btn az-btn-primary" 
-                        style={{ padding: "8px 16px", fontWeight: 700 }}
                         onClick={() => handleValidar(obj.uid, obj.docId, obj._titulo)}
                       >
                         ✅ Validar
                       </button>
                     </div>
-
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-        ))
-      )}
-    </div>
-  );
-}
+          ))
+        )}
+      </div>
+    )}
+
+    {tabAtual === "OPORTUNIDADES" && (
+      <div className="animate-fade-in">
+        <div className="az-panel" style={{ 
+          background: "rgba(255,255,255,0.05)", padding: "16px 24px", borderRadius: "12px", 
+          marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" 
+        }}>
+          <h3 style={{ margin: 0, color: "#fff", display: "flex", alignItems: "center", gap: 8 }}>
+            📢 Oportunidades para a Unidade
+          </h3>
+          <button style={{ 
+            background: "rgba(255,255,255,0.1)", border: "none", color: "#eee", 
+            padding: "6px 12px", borderRadius: "8px", fontSize: "12px" 
+          }}>
+            📂 Ver Arquivo ({(oportunidadesArquivadas || []).length})
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {oportunidades.map((op) => (
+            <div key={op.id} style={{
+              background: "#121212", border: "1px solid #1a2a2a", borderTop: "3px solid var(--brand-teal)",
+              borderRadius: "12px", padding: "20px", boxShadow: "0 4px 12px rgba(0,0,0,0.3)"
+            }}>
+              <h4 style={{ color: "#ff8a00", margin: "0 0 12px 0", fontSize: "16px" }}>{op.titulo}</h4>
+              <p style={{ color: "#bbb", fontSize: "14px", lineHeight: "1.6", marginBottom: 20 }}>{op.descricao}</p>
+              
+              <div style={{ 
+                display: "flex", justifyContent: "space-between", alignItems: "center", 
+                borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 16 
+              }}>
+                <a href={op.link} target="_blank" rel="noreferrer" style={{ color: "#4a90e2", textDecoration: "none", fontSize: "13px" }}>
+                  Abrir Link 🔗
+                </a>
+                {/* Apenas botão Arquivar para o Guia */}
+                <button className="az-btn-sm" style={{ 
+                  background: "#eee", color: "#333", border: "none", padding: "6px 16px", 
+                  borderRadius: "6px", fontSize: "12px", fontWeight: "700" 
+                }}>
+                  📥 Arquivar
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+  </div>
+    )}
+
+
+

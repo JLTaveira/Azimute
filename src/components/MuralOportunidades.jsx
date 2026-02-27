@@ -31,7 +31,8 @@ export default function MuralOportunidades({ profile, onDistribute }) {
 
       // Apenas Dirigentes da secção ouvem esta tag
       if (profile.tipo === "DIRIGENTE") {
-        tags.push(`${s}_DIRIGENTES`);
+        tags.push(`${s}_DIRIGENTES`); // recebe as mensagens só para dirigentes da secção (ex: "EXPLORADORES_DIRIGENTES")
+        tags.push(`${s}_GUIAS`);      // recebe TAMBÉM as que são para os guias
       }
 
       // Apenas Guias e Sub-Guias ouvem esta tag

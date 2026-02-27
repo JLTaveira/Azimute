@@ -169,22 +169,31 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
     setProgChecked(hasIt); setProgInitial(new Set(hasIt));
   }, [progObj, objetivosUsers]);
 
-  async function handleDistribuirParaUnidade(oportunidade, sufixoTag) {
+  async function handleDistribuirParaUnidade(oportunidade, sufixoTag, destino = "MURAL") {
     if (readOnly) return;
     try {
       const tagFinal = `${secaoBase}${sufixoTag}`;
+      
       await addDoc(collection(db, "oportunidades_agrupamento"), {
         titulo: oportunidade.titulo,
         descricao: oportunidade.descricao,
         link: oportunidade.link || "",
         agrupamentoId: profile.agrupamentoId,
+        // FUNDAMENTAL: Sem isto o Guia não consegue filtrar por Unidade
+        secaoDocId: profile.secaoDocId, 
         alvos: [tagFinal],
         autor: profile.nome,
-        createdAt: serverTimestamp()
+        // NOVO: Define se vai para o Mural (Todos) ou Tab de Gestão (Guias)
+        destinatarios: destino, 
+        createdAt: serverTimestamp(),
+        arquivada: false
       });
+
       setShareModal(null);
-      alert("Publicado no Mural com sucesso!");
+      const msg = destino === "GUIAS" ? "Enviado para a gestão dos Guias!" : "Publicado no Mural!";
+      alert(msg);
     } catch (error) {
+      console.error(error);
       alert("Erro ao publicar.");
     }
   }
@@ -362,7 +371,7 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
 
       {tabAtual === "PENDENTES" && !readOnly && (
         <div className="az-grid" style={{ gap: 16 }}>
-          {pendentesGrouped.length === 0 ? <div className="az-panel" style={{ textAlign: "center", padding: "40px" }}><p className="az-muted">Tudo em dia!</p></div> : (
+          {pendentesGrouped.length === 0 ? <div className="az-panel" style={{ textAlign: "center", padding: "40px" }}><p className="az-muted" style={{ color: "var(--text-muted)" }}>Tudo em dia!</p></div> : (
             pendentesGrouped.map(pat => (
               <div key={pat.nome} className="az-card">
                 <div className="az-card-inner">
@@ -533,7 +542,7 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
           </div>
         </div>
       )}
-        {tabAtual === "OPORTUNIDADES" && (
+      {tabAtual === "OPORTUNIDADES" && (
       <div className="az-grid" style={{ gap: 24 }}>
         <div className="az-card">
           <div className="az-card-inner az-row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
@@ -659,7 +668,7 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
             <h4 className="az-h4">Partilhar com:</h4>
             <div className="az-grid" style={{ gap: 10, marginTop: 15 }}>
               <button className="az-btn az-btn-primary" onClick={() => handleDistribuirParaUnidade(shareModal, "")}>🌍 Toda a Secção</button>
-              <button className="az-btn az-btn-teal" onClick={() => handleDistribuirParaUnidade(shareModal, "_GUIAS")}>⚜️ Só Guias e Sub-Guias</button>
+              <button className="az-btn az-btn-teal" onClick={() => handleDistribuirParaUnidade(shareModal, "_GUIAS")}>⚜️ Guias, Sub-Guias e Dirigentes</button>
               <button className="az-btn" onClick={() => handleDistribuirParaUnidade(shareModal, "_DIRIGENTES")}>👔 Só Dirigentes da Unidade</button>
             </div>
             <button className="az-btn-text" style={{ marginTop: 15, width: '100%' }} onClick={() => setShareModal(null)}>Cancelar</button>
