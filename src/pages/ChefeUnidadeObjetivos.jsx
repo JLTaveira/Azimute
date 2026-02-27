@@ -356,7 +356,7 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
 
       {/* 2. MURAL (Fica aqui, entre o cabeçalho e as abas) */}
       <MuralOportunidades 
-        profile={profile} 
+        profile={profile} contextoRole="CHEFE_UNIDADE"  
         onDistribute={readOnly ? null : (op) => setShareModal(op)} 
       />
 

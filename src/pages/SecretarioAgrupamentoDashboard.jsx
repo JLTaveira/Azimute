@@ -11,6 +11,7 @@ import {
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../firebase";
 import * as XLSX from "xlsx"; 
+import MuralOportunidades from "../components/MuralOportunidades";
 
 import saImg from "../assets/sa.png";
 
@@ -363,7 +364,7 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
         <button className={`az-tab ${filtro === "PENDENTES" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PENDENTES")}>📥 Ações Pendentes ({contagemPendentes})</button>
         <button className={`az-tab ${filtro === "RESOLVIDAS" ? "az-tab--active" : ""}`} onClick={() => setFiltro("RESOLVIDAS")}>🗄️ Arquivo / Emitidas</button>
         <button className={`az-tab ${filtro === "EFETIVO" ? "az-tab--active" : ""}`} onClick={() => setFiltro("EFETIVO")}>👥 Efetivo Global (Consulta)</button>
-        <button className={`az-tab ${filtro === "PADLET" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PADLET")}>🌐 Oportunidades (CNE)</button>
+        <button className={`az-tab ${filtro === "PADLET" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PADLET")}>🌐 Oportunidades Educativas (CNE)</button>
       </div>
 
       {/* ABA: PENDENTES E RESOLVIDAS */}
@@ -420,6 +421,16 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
 
       {/* ABA: PADLET */}
       {filtro === "PADLET" && (
+        <div className="az-grid" style={{ gap: 24 }}>
+    
+        {/* 1. MURAL DE COMUNICAÇÕES INTERNAS (Abaixo do cabeçalho da tab) */}
+        <MuralOportunidades 
+          profile={profile} 
+          contextoRole="SECRETARIO_AGRUPAMENTO" 
+          onDistribute={(op) => setShareModal(op)} // Permite ao SA re-distribuir mensagens internas
+        />
+
+        {/* 2. TRIAGEM PEDAGÓGICA (O que já tinhas do Padlet) */}
         <div className="az-card">
           <div className="az-card-inner">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
@@ -436,17 +447,18 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
                 )}
               </div>
             </div>
-
-            <div className="az-grid-2">
-              {oportunidadesVisiveis.map(op => {
-                const isExposed = expandidoId === op.id;
-                return (
-                  <div key={op.id} className="az-panel" style={{ borderLeft: "4px solid var(--brand-orange)", background: "rgba(0,0,0,0.2)" }}>
-                    <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: "var(--text)" }}>{op.titulo}</div>
-                    <div 
-                      className="az-small" 
-                      style={{ marginBottom: 12, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: isExposed ? "unset" : "3", WebkitBoxOrient: "vertical", color: "rgba(255,255,255,0.8)" }}
-                      dangerouslySetInnerHTML={{ __html: op.descricao }} 
+          </div>
+          
+          <div className="az-grid-2">
+            {oportunidadesVisiveis.map(op => {
+              const isExposed = expandidoId === op.id;
+              return (
+                <div key={op.id} className="az-panel" style={{ borderLeft: "4px solid var(--brand-orange)", background: "rgba(0,0,0,0.2)" }}>
+                  <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: "var(--text)" }}>{op.titulo}</div>
+                  <div 
+                    className="az-small" 
+                    style={{ marginBottom: 12, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: isExposed ? "unset" : "3", WebkitBoxOrient: "vertical", color: "rgba(255,255,255,0.8)" }}
+                    dangerouslySetInnerHTML={{ __html: op.descricao }} 
                     />
                     <button onClick={() => setExpandidoId(isExposed ? null : op.id)} className="az-btn-text" style={{ color: "var(--brand-orange)", fontSize: 11, marginBottom: 12, cursor: "pointer", background: "none", border: "none" }}>
                       {isExposed ? "↑ Ler menos" : "↓ Ler tudo"}
@@ -598,41 +610,6 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
         </>
       )}
 
-      {/* MODAL DE ARQUIVO PADLET (Seletivo) */}
-      {/*
-      {showArchiveModal && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.9)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "center", padding: 20 }}>
-          <div className="az-card" style={{ width: "100%", maxWidth: 600, background: "#1a1a1a", border: "1px solid var(--stroke)" }}>
-            <div className="az-card-inner">
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
-                <h3 style={{ margin: 0, color: "var(--brand-orange)" }}>🗄️ Arquivo de Oportunidades</h3>
-                <button className="az-btn-text" onClick={() => setShowArchiveModal(false)} style={{ color: "white", fontSize: 20 }}>&times;</button>
-              </div>
-              <div style={{ maxHeight: "60vh", overflowY: "auto", display: "grid", gap: 12 }}>
-                {ocultosAgrupamento.length === 0 ? (
-                  <p className="az-muted">O arquivo está vazio.</p>
-                ) : (
-                  oportunidadesCNE.filter(op => ocultosAgrupamento.includes(op.id)).map(op => (
-                    <div key={op.id} style={{ background: "rgba(255,255,255,0.05)", padding: 12, borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div>
-                        <div style={{ fontWeight: 700, color: "white" }}>{op.titulo}</div>
-                        <div className="az-small muted">{op.coluna}</div>
-                      </div>
-                      {!readOnly && (
-                        <button className="az-btn az-btn-teal" style={{ padding: "4px 12px", fontSize: 11 }} onClick={() => handleRecuperarPadlet(op.id)}>♻️ Recuperar</button>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-              <div style={{ marginTop: 24, textAlign: "right" }}>
-                <button className="az-btn" onClick={() => setShowArchiveModal(false)}>Fechar Arquivo</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )} */}
-
       {/* MODAL DE ARQUIVO (Recuperação Seletiva) */}
       {showArchiveModal && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.9)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "center", padding: 20 }}>
@@ -675,7 +652,11 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
                       { id: "CAMINHEIROS", label: "Chefe de Unidade (Clã)" }
                     ].map(alvo => (
                       <label key={alvo.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                        <input type="checkbox" checked={shareTargets.includes(alvo.id)} onChange={() => handleTargetToggle(alvo.id)} />
+                        <input
+                          type="checkbox"
+                          checked={shareTargets.includes(alvo.id)}
+                          onChange={() => handleTargetToggle(alvo.id)}
+                        />
                         <span style={{ fontSize: 13, color: "var(--text)" }}>{alvo.label}</span>
                       </label>
                     ))}
@@ -683,7 +664,13 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
                 </div>
                 <div className="az-form-group" style={{ marginBottom: 20 }}>
                   <label>Visível até:</label>
-                  <input type="date" required className="az-input" value={shareDataFim} onChange={e => setShareDataFim(e.target.value)} />
+                  <input
+                    type="date"
+                    required
+                    className="az-input"
+                    value={shareDataFim}
+                    onChange={e => setShareDataFim(e.target.value)}
+                  />
                 </div>
                 <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
                   <button type="button" className="az-btn" onClick={() => setShareModal(null)}>Cancelar</button>

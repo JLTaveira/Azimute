@@ -267,7 +267,7 @@ export default function ChefeAgrupamentoDashboard({ profile }) {
 
       {tabAtual === "MURAL" && (
         <div className="animate-fade-in">
-          <MuralOportunidades profile={profile} />
+          <MuralOportunidades profile={profile} contextoRole="CHEFE_AGRUPAMENTO" />
         </div>
       )}
 
