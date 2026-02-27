@@ -6,7 +6,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
 import MuralOportunidades from "../components/MuralOportunidades";
 
 const AREA_META = {
@@ -49,8 +49,6 @@ function descricaoDoCatalogo(o) {
 
 export default function GuiaObjetivosGrupo({ profile }) {
   const [tabAtual, setTabAtual] = useState("VALIDAR");
-  const [oportunidades, setOportunidades] = useState([]); 
-  const [oportunidadesArquivadas, setOportunidadesArquivadas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
   const [elementos, setElementos] = useState([]);
@@ -62,13 +60,14 @@ export default function GuiaObjetivosGrupo({ profile }) {
   useEffect(() => {
     if (!profile?.patrulhaId || !profile?.secaoDocId) return;
 
-    async function fetchData() {
-      setLoading(true); setErro("");
-      try {
-        // 1. Vai buscar o Catálogo da Secção para sabermos os Títulos e Cores
-        const qCat = query(collection(db, "catalogoObjetivos"), where("secao", "==", secaoBase));
-        const snapCat = await getDocs(qCat);
-        const cat = snapCat.docs.map(d => ({ 
+  async function fetchData() {
+    setLoading(true); 
+    setErro("");
+    try {
+      // 1. Vai buscar o Catálogo da Secção
+      const qCat = query(collection(db, "catalogoObjetivos"), where("secao", "==", secaoBase));
+      const snapCat = await getDocs(qCat);
+      const cat = snapCat.docs.map(d => ({ 
         id: d.id, 
         _areaKey: areaToKey(d.data().areaDesenvolvimento || d.data().area), 
         _trilho: d.data().trilhoEducativo || d.data().trilho || "Geral", 
@@ -78,77 +77,40 @@ export default function GuiaObjetivosGrupo({ profile }) {
       }));
       setCatalogo(cat);
 
-        // 2. Vai buscar os Elementos da mesma Patrulha/Bando
-        const qUsers = query(
-          collection(db, "users"), 
-          where("agrupamentoId", "==", profile.agrupamentoId), 
-          where("secaoDocId", "==", profile.secaoDocId),
-          where("patrulhaId", "==", profile.patrulhaId),
-          where("tipo", "==", "ELEMENTO")
-        );
-        const snapUsers = await getDocs(qUsers);
-        const listaElementos = snapUsers.docs
+      // 2. Vai buscar os Elementos da mesma Patrulha/Bando
+      const qUsers = query(
+        collection(db, "users"), 
+        where("agrupamentoId", "==", profile.agrupamentoId), 
+        where("secaoDocId", "==", profile.secaoDocId),
+        where("patrulhaId", "==", profile.patrulhaId),
+        where("tipo", "==", "ELEMENTO")
+      );
+      const snapUsers = await getDocs(qUsers);
+      const listaElementos = snapUsers.docs
         .map(d => ({ uid: d.id, ...d.data() }))
         .filter(u => u.uid !== profile.uid && u.ativo !== false);
       setElementos(listaElementos.sort((a,b) => a.nome.localeCompare(b.nome)));
 
-        // 3. Vai buscar apenas os Objetivos que estão em "ESCOLHA" (A aguardar validação)
-        const todosObjetivos = [];
-        await Promise.all(
-          listaElementos.map(async (elemento) => {
-            const snapObjs = await getDocs(query(collection(db, `users/${elemento.uid}/objetivos`), where("estado", "==", "ESCOLHA")));
-            snapObjs.forEach(objSnap => {
-              todosObjetivos.push({ uid: elemento.uid, docId: objSnap.id, ...objSnap.data() });
-            });
-          })
-        );
-        setObjetivos(todosObjetivos);
+      // 3. Vai buscar os Objetivos em "ESCOLHA"
+      const todosObjetivos = [];
+      await Promise.all(
+        listaElementos.map(async (elemento) => {
+          const snapObjs = await getDocs(query(collection(db, `users/${elemento.uid}/objetivos`), where("estado", "==", "ESCOLHA")));
+          snapObjs.forEach(objSnap => {
+            todosObjetivos.push({ uid: elemento.uid, docId: objSnap.id, ...objSnap.data() });
+          });
+        })
+      );
+      setObjetivos(todosObjetivos);
 
-        // 4. Vai buscar as Oportunidades Educativas enviadas pelo Chefe para esta Secção //
-        const [snapCne, snapAgrup] = await Promise.all([
-        getDocs(query(collection(db, "oportunidades_cne"))),
-        getDocs(query(collection(db, "oportunidades_agrupamento"), 
-                where("agrupamentoId", "==", profile.agrupamentoId)))
-      ]);
-
-      const todas = [
-        ...snapCne.docs.map(d => ({ id: d.id, ...d.data(), tipo: 'CNE' })),
-        ...snapAgrup.docs.map(d => ({ id: d.id, ...d.data(), tipo: 'LOCAL' }))
-      ];
-
-        const opsFiltradas = todas.filter(o => {
-        // Normalizamos os campos da base de dados
-        const pSecaoDoc = o.secaoDocId; // ID específico da Unidade (ex: Clã 115)
-        const pSecaoNome = String(o.secao || "").toUpperCase(); // Nome da Secção (ex: LOBITOS)
-        const pColuna = String(o.coluna || "").toUpperCase();
-
-        // CONDIÇÃO ESTRITA:
-        // 1. Foi enviado especificamente para a tua Unidade (Clã/Patrulha/Bando)
-        if (pSecaoDoc === profile.secaoDocId) return true;
-
-        // 2. Foi enviado para a tua Secção (dinâmico: LOBITOS, EXPLORADORES, etc.)
-        // mas APENAS se não for uma mensagem de âmbito geral de Agrupamento
-        const eParaMinhaSecao = (pSecaoNome === secaoBase) || pColuna.includes(secaoBase);
-        
-        // Se for para a tua secção e tiver um alvo definido, o Guia vê.
-        // Se for "GERAL", o filtro ignora (consultas como elemento noutra tab).
-        return (
-          o.secaoDocId === profile.secaoDocId && 
-          o.destinatarios === "GUIAS"
-        );
-      });
-      
-      setOportunidades(opsFiltradas.filter(o => !o.arquivada));
-      setOportunidadesArquivadas(opsFiltradas.filter(o => o.arquivada));
-
-      } catch (err) {
-        console.error("Erro detalhado:", err);
-        setErro("Erro ao carregar os dados da patrulha.");
-      } finally {
-        setLoading(false);
-      }
+    } catch (err) {
+      console.error("Erro detalhado:", err);
+      setErro("Erro ao carregar os dados da patrulha.");
+    } finally {
+      setLoading(false);
     }
-    fetchData();
+  }
+  fetchData();
   }, [profile, secaoBase]);
 
   // Junta os dados do utilizador com os dados bonitos do Catálogo
@@ -164,18 +126,20 @@ export default function GuiaObjetivosGrupo({ profile }) {
     if (!window.confirm(`Queres validar o objetivo "${titulo || 'Desconhecido'}"?\nIsto enviará a proposta para a aprovação final da Equipa de Animação.`)) return;
 
     try {
-      const ref = doc(db, `users/${uid}/objetivos/${docId}`);
+      const ref = doc(db, "users", uid, "objetivos", docId);
       await updateDoc(ref, {
         estado: "VALIDADO",
-        validadoPor: profile.uid,
+        validadoPor: auth.currentUser.uid,
         validadoAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
 
       // Remove imediatamente da lista visual
       setObjetivos(prev => prev.filter(o => !(o.uid === uid && o.docId === docId)));
+      alert("Validado!");
     } catch (error) {
-      alert("Erro ao validar objetivo. Verifica as tuas ligações ou permissões.");
+      console.error("Erro ao validar:", error);
+      alert("Erro de permissão. Verifica se tens 'isGuia' a true na BD.");
     }
   }
 
@@ -288,52 +252,9 @@ export default function GuiaObjetivosGrupo({ profile }) {
 
     {tabAtual === "OPORTUNIDADES" && (
       <div className="animate-fade-in">
-        <div className="az-panel" style={{ 
-          background: "rgba(255,255,255,0.05)", padding: "16px 24px", borderRadius: "12px", 
-          marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" 
-        }}>
-          <h3 style={{ margin: 0, color: "#fff", display: "flex", alignItems: "center", gap: 8 }}>
-            📢 Oportunidades para a Unidade
-          </h3>
-          <button style={{ 
-            background: "rgba(255,255,255,0.1)", border: "none", color: "#eee", 
-            padding: "6px 12px", borderRadius: "8px", fontSize: "12px" 
-          }}>
-            📂 Ver Arquivo ({(oportunidadesArquivadas || []).length})
-          </button>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {oportunidades.map((op) => (
-            <div key={op.id} style={{
-              background: "#121212", border: "1px solid #1a2a2a", borderTop: "3px solid var(--brand-teal)",
-              borderRadius: "12px", padding: "20px", boxShadow: "0 4px 12px rgba(0,0,0,0.3)"
-            }}>
-              <h4 style={{ color: "#ff8a00", margin: "0 0 12px 0", fontSize: "16px" }}>{op.titulo}</h4>
-              <p style={{ color: "#bbb", fontSize: "14px", lineHeight: "1.6", marginBottom: 20 }}>{op.descricao}</p>
-              
-              <div style={{ 
-                display: "flex", justifyContent: "space-between", alignItems: "center", 
-                borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 16 
-              }}>
-                <a href={op.link} target="_blank" rel="noreferrer" style={{ color: "#4a90e2", textDecoration: "none", fontSize: "13px" }}>
-                  Abrir Link 🔗
-                </a>
-                {/* Apenas botão Arquivar para o Guia */}
-                <button className="az-btn-sm" style={{ 
-                  background: "#eee", color: "#333", border: "none", padding: "6px 16px", 
-                  borderRadius: "6px", fontSize: "12px", fontWeight: "700" 
-                }}>
-                  📥 Arquivar
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <MuralOportunidades profile={profile} contextoRole="ELEMENTO" />
       </div>
     )}
-  </div>
-    )}
-
-
-
+</div>
+);
+}

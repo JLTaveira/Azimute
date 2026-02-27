@@ -19,16 +19,25 @@ service cloud.firestore {
     }
 
    function hasFuncao(f) { 
-  return meExists() && me().funcoes.hasAny([f]); 
-  }
+      return meExists() &&
+        me().tipo == "DIRIGENTE" && 
+         ('funcoes' in me()) && 
+         me().funcoes.hasAny([f]); 
+}
 
     function isChefeAgrupamento() { return hasFuncao("CHEFE_AGRUPAMENTO"); }
     function isSecretarioAgrupamento() { return hasFuncao("SECRETARIO_AGRUPAMENTO"); }
     function isChefeUnidade() { return hasFuncao("CHEFE_UNIDADE"); }
     function isDirigente() { return meExists() && me().tipo == "DIRIGENTE"; }
-    function isGuiaOuSubGuia() {
-      return meExists() && me().tipo == "ELEMENTO" && (me().isGuia == true || me().isSubGuia == true);
-    }
+
+    function isGuiaOuSubGuia(){
+      return meExists() && 
+         me().tipo == "ELEMENTO" && 
+         (
+           ('isGuia' in me() && me().isGuia == true) || 
+           ('isSubGuia' in me() && me().isSubGuia == true)
+         );
+}
 
     function sameAgrupamento(targetData) {
       return meExists() && targetData.agrupamentoId == me().agrupamentoId;

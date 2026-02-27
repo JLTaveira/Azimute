@@ -225,6 +225,7 @@ export default function App() {
             </div>
             <div style={{ marginTop: "32px", textAlign: "center", color: "rgba(255, 255, 255, 0.6)" }}>
               <div style={{ fontSize: "12px", fontWeight: 600 }}>© 2026 Azimute</div>
+              <div style={{ fontSize: "11px", marginTop: 4, fontStyle: "italic" }}>Desenvolvido por João Taveira (Agrupamento 1104 - Paranhos)</div>
             </div>
           </div>
         ) : profile?.forcarMudancaPassword ? (
