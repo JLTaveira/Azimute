@@ -55,9 +55,9 @@ export default function MuralOportunidades({ profile, onDistribute, contextoRole
 
     // 4. CONTEXTO: CHEFE DE UNIDADE (Na tab da Secção)
     if (contextoRole === "CHEFE_UNIDADE" && s) {
-      options.push({ label: "🖼️ Unidade", value: s.toUpperCase });
-      options.push({ label: "🎯 Guias e Sub-Guias", value: `${s.toUpperCase()}_GUIAS` });
-      options.push({ label: "👥 Equipa de Animação", value: `${s.toUpperCase()}_DIRIGENTES` });
+      options.push({ label: "🖼️ Unidade", value: s });
+      options.push({ label: "🎯 Guias e Sub-Guias", value: `${s}_GUIAS` });
+      options.push({ label: "👥 Equipa de Animação", value: `${s}_DIRIGENTES` });
     }
 
     return options;
@@ -158,7 +158,7 @@ export default function MuralOportunidades({ profile, onDistribute, contextoRole
         descricao: formData.descricao,
         link: formData.link || "",
         agrupamentoId: profile.agrupamentoId,
-        alvos: [formData.destino.toUpperCase()], // A tag selecionada no dropdown
+        alvos: [formData.destino], // A tag selecionada no dropdown
         autor: profile.nome,
         autorCargo: contextoRole.replace(/_/g, " "),
         createdAt: serverTimestamp(),

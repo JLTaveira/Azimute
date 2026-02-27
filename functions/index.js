@@ -9,6 +9,7 @@ const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 const axios = require("axios");
 const xml2js = require("xml2js");
+const cheerio = require("cheerio");
 
 // Inicializa o Admin SDK
 if (admin.apps.length === 0) {
@@ -169,9 +170,7 @@ exports.toggleUserStatus = onCall(async (request) => {
 // ============================================================================
 // 4. SINCRONIZAÇÃO DE OPORTUNIDADES EDUCATIVAS (PADLET CNE)
 // ============================================================================
-// ============================================================================
-// 4. SINCRONIZAÇÃO REAL DO PADLET (VERSÃO FINAL)
-// ============================================================================
+
 exports.syncOportunidadesCNE = onCall(async (request) => {
   const { auth } = request;
   if (!auth) throw new HttpsError("unauthenticated", "Sem permissão.");

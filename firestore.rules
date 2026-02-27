@@ -122,5 +122,11 @@ service cloud.firestore {
       allow read: if signedIn() && sameAgrupamento(resource.data);
       allow write: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento() || isChefeUnidade());
     }
-  } 
+
+    // Recursos Oficiais (CNE)
+    match /recursos_oficiais_cne/{id} {
+      allow read: if signedIn();
+      allow write: if signedIn() && isSecretarioAgrupamento();
+    }
+  }
 }

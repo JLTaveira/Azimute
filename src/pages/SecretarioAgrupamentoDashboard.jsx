@@ -160,7 +160,6 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
       fetchDadosSecretaria();
     } catch (error) { alert("Erro ao sincronizar: " + error.message); } finally { setSyncing(false); }
   }
-
   async function handleOcultarPadlet(padletId) {
     if (readOnly) return;
     if (!window.confirm("Desejas arquivar esta oportunidade sem distribuir?")) return;
@@ -363,8 +362,8 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
       <div className="az-tabs">
         <button className={`az-tab ${filtro === "PENDENTES" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PENDENTES")}>📥 Ações Pendentes ({contagemPendentes})</button>
         <button className={`az-tab ${filtro === "RESOLVIDAS" ? "az-tab--active" : ""}`} onClick={() => setFiltro("RESOLVIDAS")}>🗄️ Arquivo / Emitidas</button>
-        <button className={`az-tab ${filtro === "EFETIVO" ? "az-tab--active" : ""}`} onClick={() => setFiltro("EFETIVO")}>👥 Efetivo Global (Consulta)</button>
-        <button className={`az-tab ${filtro === "PADLET" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PADLET")}>🌐 Oportunidades Educativas (CNE)</button>
+        <button className={`az-tab ${filtro === "EFETIVO" ? "az-tab--active" : ""}`} onClick={() => setFiltro("EFETIVO")}>👥 Efetivo Agrupamento</button>
+        <button className={`az-tab ${filtro === "PADLET" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PADLET")}>🌐 Op. Educativas (CNE)</button>
       </div>
 
       {/* ABA: PENDENTES E RESOLVIDAS */}
@@ -436,7 +435,7 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <div>
                 <h3 style={{ margin: 0, color: "var(--brand-teal)" }}>Triagem Pedagógica</h3>
-                <p className="az-small muted">Oportunidades do Nacional para a Chefia e Unidades.</p>
+                <p className="az-small muted">Oportunidades Pedagógicas (SNA).</p>
               </div>
               <div style={{ display: "flex", gap: 12 }}>
                 <button className="az-btn" style={{ borderColor: "var(--brand-orange)", color: "var(--brand-orange)" }} onClick={() => setShowArchiveModal(true)}>🗄️ Ver Arquivo ({ocultosAgrupamento.length})</button>
@@ -480,7 +479,7 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
         </div>
       )}
 
-      {/* ABA: EFETIVO (Versão Original Restaurada) */}
+      {/* ABA: EFETIVO ( */}
       {filtro === "EFETIVO" && (
         <>
           <div className="az-card" style={{ background: "rgba(23,154,171,.03)" }}>
