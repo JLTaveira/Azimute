@@ -23,7 +23,7 @@ service cloud.firestore {
         me().tipo == "DIRIGENTE" && 
          ('funcoes' in me()) && 
          me().funcoes.hasAny([f]); 
-}
+    }
 
     function isChefeAgrupamento() { return hasFuncao("CHEFE_AGRUPAMENTO"); }
     function isSecretarioAgrupamento() { return hasFuncao("SECRETARIO_AGRUPAMENTO"); }
@@ -37,7 +37,7 @@ service cloud.firestore {
            ('isGuia' in me() && me().isGuia == true) || 
            ('isSubGuia' in me() && me().isSubGuia == true)
          );
-}
+    }
 
     function sameAgrupamento(targetData) {
       return meExists() && targetData.agrupamentoId == me().agrupamentoId;
@@ -69,9 +69,9 @@ service cloud.firestore {
 
       match /objetivos/{oid} {
         allow read: if signedIn() && (request.auth.uid == uid || isChefeAgrupamento() || isDirigente() || isGuiaOuSubGuia());
-        allow create: if signedIn() && (request.auth.uid == uid || isChefeUnidade());
-        allow delete: if signedIn() && (request.auth.uid == uid || isChefeUnidade());
-        allow update: if signedIn() && (isGuiaOuSubGuia() || isChefeUnidade());
+        allow create, delete: if signedIn() && (request.auth.uid == uid || isChefeUnidade());
+        // O elemento (request.auth.uid == uid) já está aqui, isto está correto.
+        allow update: if signedIn() && (request.auth.uid == uid || isGuiaOuSubGuia() || isChefeUnidade());
       }
 
       match /meta/{docId} {
@@ -80,17 +80,32 @@ service cloud.firestore {
     }
 
     // ==========================================
-    // COLEÇÃO: NOTIFICAÇÕES (ORDEM DE SERVIÇO)
+    // COLEÇÃO: NOTIFICAÇÕES (Mistas: O.S. e Felicitações)
     // ==========================================
     match /notificacoes/{nid} {
-      allow read: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento()) && resource.data.agrupamentoId == me().agrupamentoId;
+      // LEITURA: 
+      // 1. Chefia pode ler notificações do seu agrupamento (O.S. e Anilhas)
+      // 2. Elementos podem ler se o seu UID estiver no campo uidElemento (Felicitações)
+      allow read: if signedIn() && (
+        ( (isSecretarioAgrupamento() || isChefeAgrupamento()) && resource.data.agrupamentoId == me().agrupamentoId ) 
+        || 
+        ( resource.data.uidElemento == request.auth.uid )
+      );
       
-      // 🚨 PERMITE À SECRETARIA CRIAR NOTIFICAÇÕES DE "SAIU/VOLTOU AO ATIVO"
+      // CRIAÇÃO: Qualquer Dirigente/Chefe pode criar (Avisa Secretaria, Felicitações)
       allow create: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento() || isDirigente() || isChefeUnidade());
 
-      allow update: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento())
-        && sameAgrupamento(resource.data)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['resolvida', 'resolvidaAt', 'resolvidaPorUid']);
+      // UPDATE: 
+      // 1. Elementos podem marcar as suas felicitações como lidas
+      // 2. Chefia pode marcar O.S. como resolvidas
+      allow update: if signedIn() && (
+        ( resource.data.uidElemento == request.auth.uid )
+        || 
+        ( (isSecretarioAgrupamento() || isChefeAgrupamento()) && sameAgrupamento(resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['resolvida', 'resolvidaAt', 'resolvidaPorUid']) )
+      );
+      
+      // Escrita total para Chefes se for preciso apagar
+      allow write: if signedIn() && isDirigente();
     }
 
     match /agrupamento/{agrupamentoId} {
@@ -113,29 +128,24 @@ service cloud.firestore {
     // COLEÇÃO: OPORTUNIDADES (OBJETIVOS NACIONAIS E AGRUPAMENTO)
     // ==========================================
 
-    // Objetivos Nacionais (Sincronizados via XML pelo Secretário)
     match /oportunidades_cne/{id} {
       allow read: if signedIn();
       allow write: if signedIn() && isSecretarioAgrupamento();
     }
 
-    // Oportunidades criadas pelo próprio Agrupamento
     match /oportunidades_agrupamento/{id} {
       allow read: if signedIn() && sameAgrupamento(resource.data);
-      // SA, CA e CU podem gerir as oportunidades locais
       allow write: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento() || isChefeUnidade());
     }
 
-    // Oportunidades Ocultas ou Arquivadas
     match /oportunidades_ocultas/{id} {
       allow read: if signedIn() && sameAgrupamento(resource.data);
       allow write: if signedIn() && (isSecretarioAgrupamento() || isChefeAgrupamento() || isChefeUnidade());
     }
 
-    // Recursos Oficiais (CNE)
     match /recursos_oficiais_cne/{id} {
       allow read: if signedIn();
       allow write: if signedIn() && isSecretarioAgrupamento();
     }
-  }
-}
+  } // FIM DO BLOCO /databases/{database}/documents
+} // FIM DO SERVICE CLOUD.FIRESTORE

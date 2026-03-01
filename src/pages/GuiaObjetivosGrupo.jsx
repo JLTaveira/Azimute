@@ -60,57 +60,69 @@ export default function GuiaObjetivosGrupo({ profile }) {
   useEffect(() => {
     if (!profile?.patrulhaId || !profile?.secaoDocId) return;
 
-  async function fetchData() {
-    setLoading(true); 
-    setErro("");
-    try {
-      // 1. Vai buscar o Catálogo da Secção
-      const qCat = query(collection(db, "catalogoObjetivos"), where("secao", "==", secaoBase));
-      const snapCat = await getDocs(qCat);
-      const cat = snapCat.docs.map(d => ({ 
-        id: d.id, 
-        _areaKey: areaToKey(d.data().areaDesenvolvimento || d.data().area), 
-        _trilho: d.data().trilhoEducativo || d.data().trilho || "Geral", 
-        _codigo: d.data().codigo || extrairCodigoFromOid(d.id), 
-        _titulo: descricaoDoCatalogo(d.data()), 
-        ...d.data() 
-      }));
-      setCatalogo(cat);
+    async function fetchData() {
+      setLoading(true);
+      setErro("");
+      try {
+        // 1. Vai buscar o Catálogo da Secção
+        const qCat = query(
+          collection(db, "catalogoObjetivos"),
+          where("secao", "==", secaoBase)
+        );
+        const snapCat = await getDocs(qCat);
+        const cat = snapCat.docs.map(d => ({
+          id: d.id,
+          _areaKey: areaToKey(d.data().areaDesenvolvimento || d.data().area),
+          _trilho: d.data().trilhoEducativo || d.data().trilho || "Geral",
+          _codigo: d.data().codigo || extrairCodigoFromOid(d.id),
+          _titulo: descricaoDoCatalogo(d.data()),
+          ...d.data(),
+        }));
+        setCatalogo(cat);
 
-      // 2. Vai buscar os Elementos da mesma Patrulha/Bando
-      const qUsers = query(
-        collection(db, "users"), 
-        where("agrupamentoId", "==", profile.agrupamentoId), 
-        where("secaoDocId", "==", profile.secaoDocId),
-        where("patrulhaId", "==", profile.patrulhaId),
-        where("tipo", "==", "ELEMENTO")
-      );
-      const snapUsers = await getDocs(qUsers);
-      const listaElementos = snapUsers.docs
-        .map(d => ({ uid: d.id, ...d.data() }))
-        .filter(u => u.uid !== profile.uid && u.ativo !== false);
-      setElementos(listaElementos.sort((a,b) => a.nome.localeCompare(b.nome)));
+        // 2. Vai buscar os Elementos da mesma Patrulha/Bando
+        const qUsers = query(
+          collection(db, "users"),
+          where("agrupamentoId", "==", profile.agrupamentoId),
+          where("secaoDocId", "==", profile.secaoDocId),
+          where("patrulhaId", "==", profile.patrulhaId),
+          where("tipo", "==", "ELEMENTO")
+        );
+        const snapUsers = await getDocs(qUsers);
+        const listaElementos = snapUsers.docs
+          .map(d => ({ uid: d.id, ...d.data() }))
+          .filter(u => u.uid !== profile.uid && u.ativo !== false);
+        setElementos(listaElementos.sort((a, b) => a.nome.localeCompare(b.nome)));
 
-      // 3. Vai buscar os Objetivos em "ESCOLHA"
-      const todosObjetivos = [];
-      await Promise.all(
-        listaElementos.map(async (elemento) => {
-          const snapObjs = await getDocs(query(collection(db, `users/${elemento.uid}/objetivos`), where("estado", "==", "ESCOLHA")));
-          snapObjs.forEach(objSnap => {
-            todosObjetivos.push({ uid: elemento.uid, docId: objSnap.id, ...objSnap.data() });
-          });
-        })
-      );
-      setObjetivos(todosObjetivos);
-
-    } catch (err) {
-      console.error("Erro detalhado:", err);
-      setErro("Erro ao carregar os dados da patrulha.");
-    } finally {
-      setLoading(false);
+        // 3. Vai buscar os Objetivos em "ESCOLHA" ou "CONFIRMADO"
+        const todosObjetivos = [];
+        await Promise.all(
+          listaElementos.map(async elemento => {
+            const snapObjs = await getDocs(
+              query(
+                collection(db, `users/${elemento.uid}/objetivos`),
+                where("estado", "in", ["ESCOLHA", "CONFIRMADO"])
+              )
+            );
+            snapObjs.forEach(objSnap => {
+              todosObjetivos.push({
+                uid: elemento.uid,
+                docId: objSnap.id,
+                ...objSnap.data(),
+              });
+            });
+          })
+        );
+        setObjetivos(todosObjetivos);
+      } catch (err) {
+        console.error("Erro detalhado:", err);
+        setErro("Erro ao carregar os dados da patrulha.");
+      } finally {
+        setLoading(false);
+      }
     }
-  }
-  fetchData();
+
+    fetchData();
   }, [profile, secaoBase]);
 
   // Junta os dados do utilizador com os dados bonitos do Catálogo
@@ -140,6 +152,45 @@ export default function GuiaObjetivosGrupo({ profile }) {
     } catch (error) {
       console.error("Erro ao validar:", error);
       alert("Erro de permissão. Verifica se tens 'isGuia' a true na BD.");
+    }
+  }
+
+  // Função para o Guia recusar a proposta
+  async function handleRecusar(uid, docId, titulo) {
+    if (!window.confirm(`Tens a certeza que queres recusar a proposta "${titulo}"?`)) return;
+
+    try {
+      const ref = doc(db, "users", uid, "objetivos", docId);
+      await updateDoc(ref, {
+        estado: "RECUSADO",
+        recusadoAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        // Opcional: podes adicionar um campo 'notas' para explicar o porquê
+      });
+
+      setObjetivos(prev => prev.filter(o => !(o.uid === uid && o.docId === docId)));
+      alert("Proposta recusada.");
+    } catch (error) {
+      console.error("Erro ao recusar:", error);
+    }
+  }
+
+  async function handleInformarConclusao(uid, docId, titulo) {
+    if (!window.confirm(`Confirmas a execução do objetivo "${titulo}"? isto será enviado para validação do Chefe.`)) return;
+
+    try {
+      const ref = doc(db, "users", uid, "objetivos", docId);
+      await updateDoc(ref, {
+        estado: "REALIZADO", // Envia para o Chefe
+        realizadoAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      // Remove da lista do Guia (já foi encaminhado)
+      setObjetivos(prev => prev.filter(o => !(o.uid === uid && o.docId === docId)));
+      alert("Informação enviada ao Chefe de Unidade!");
+    } catch (error) {
+      alert("Erro ao comunicar conclusão.");
     }
   }
 
@@ -233,13 +284,38 @@ export default function GuiaObjetivosGrupo({ profile }) {
                           Trilho: {obj._trilho || "Geral"} • Área: {AREA_META[obj._areaKey]?.nome || "Outra"}
                         </div>
                       </div>
-                      
-                      <button 
-                        className="az-btn az-btn-primary" 
-                        onClick={() => handleValidar(obj.uid, obj.docId, obj._titulo)}
-                      >
-                        ✅ Validar
-                      </button>
+
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {/* 1. Botões para Validar ou Recusar a Proposta Inicial */}
+                        {obj.estado === "ESCOLHA" && (
+                          <>
+                            <button 
+                              className="az-btn az-btn-primary" 
+                              onClick={() => handleValidar(obj.uid, obj.docId, obj._titulo)}
+                            >
+                              ✅ Validar
+                            </button>
+                            <button 
+                              className="az-btn" 
+                              style={{ borderColor: "var(--danger)", color: "var(--danger)" }}
+                              onClick={() => handleRecusar(obj.uid, obj.docId, obj._titulo)}
+                            >
+                              ❌
+                            </button>
+                          </>
+                        )}
+
+                        {/* 2. Botão para o Guia informar que o elemento já Realizou o que estava no plano */}
+                        {obj.estado === "CONFIRMADO" && (
+                          <button 
+                            className="az-btn az-btn-teal" 
+                            onClick={() => handleInformarConclusao(obj.uid, obj.docId, obj._titulo)}
+                          >
+                            🏅 Marcar Realizado
+                          </button>
+                        )}
+                      </div>
+
                     </div>
                   ))}
                 </div>

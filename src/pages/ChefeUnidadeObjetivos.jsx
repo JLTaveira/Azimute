@@ -69,11 +69,9 @@ function descricaoDoCatalogo(o) {
 
 export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
   const [tabAtual, setTabAtual] = useState(readOnly ? "SECÇÃO" : "PENDENTES");
-  /// tab para mensagens
   const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [oportunidadesUnit, setOportunidadesUnit] = useState([]);
-  const [ocultosUnit, setOcultosUnit] = useState([]); // Para o arquivo pessoal do Chefe de Unidade
-  ///
+  const [ocultosUnit, setOcultosUnit] = useState([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
   
@@ -132,14 +130,11 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
     fetchData();
   }, [profile, secaoBase]);
 
-  // useEffect para Oportunidade Educativas - mensagens
-
   useEffect(() => {
     if (!profile?.agrupamentoId || tabAtual !== "OPORTUNIDADES") return;
 
     async function fetchOportunidadesUnidade() {
       try {
-        // Ouve a tag da secção (ex: CAMINHEIROS) e a tag GERAL
         const q = query(
           collection(db, "oportunidades_agrupamento"),
           where("agrupamentoId", "==", profile.agrupamentoId),
@@ -152,8 +147,6 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
     }
     fetchOportunidadesUnidade();
   }, [tabAtual, profile, secaoBase]);
-
-  //
 
   const objetivosEnriquecidos = useMemo(() => {
     return objetivosUsers.map(obj => {
@@ -179,11 +172,9 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
         descricao: oportunidade.descricao,
         link: oportunidade.link || "",
         agrupamentoId: profile.agrupamentoId,
-        // FUNDAMENTAL: Sem isto o Guia não consegue filtrar por Unidade
         secaoDocId: profile.secaoDocId, 
         alvos: [tagFinal],
         autor: profile.nome,
-        // NOVO: Define se vai para o Mural (Todos) ou Tab de Gestão (Guias)
         destinatarios: destino, 
         createdAt: serverTimestamp(),
         arquivada: false
@@ -205,44 +196,76 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
       const ref = doc(db, `users/${objUid}/objetivos/${objDocId}`);
       const payload = { estado: novoEstado, updatedAt: serverTimestamp() };
       if (novoEstado === "CONFIRMADO") payload.confirmadoAt = serverTimestamp();
-      if (novoEstado === "CONCLUIDO") { payload.concluidoAt = serverTimestamp(); payload.bloqueado = true; }
+      if (novoEstado === "CONCLUIDO") {
+        payload.concluidoAt = serverTimestamp();
+        payload.bloqueado = true;
+      }
       if (novoEstado === "RECUSADO") payload.recusadoAt = serverTimestamp();
-      
+
       await updateDoc(ref, payload);
-      setObjetivosUsers(prev => prev.map(item => (item.uid === objUid && item.docId === objDocId) ? { ...item, ...payload } : item));
+      setObjetivosUsers(prev =>
+        prev.map(item =>
+          item.uid === objUid && item.docId === objDocId ? { ...item, ...payload } : item
+        )
+      );
 
       if (novoEstado === "CONCLUIDO") {
         const catSize = catalogo.length;
         if (catSize > 0) {
-          let countConcluidos = 1; 
+          const objInfo = catalogo.find(c => c.id === objDocId);
+
+          let countConcluidos = 1;
           objetivosUsers.forEach(o => {
-            if (o.uid === objUid && o.docId !== objDocId && o.estado === "CONCLUIDO") countConcluidos++;
+            if (o.uid === objUid && o.docId !== objDocId && o.estado === "CONCLUIDO") {
+              countConcluidos++;
+            }
           });
 
-          if (countConcluidos === catSize) {
+          const isUltimo = countConcluidos === catSize;
+
+          const textoMensagem = isUltimo
+            ? "PARABÉNS, cumpriste todas as metas e objetivos a que te tinhas proposto. És um exemplo para o CNE."
+            : `Atingiste mais uma etapa do teu percurso, parabéns! Concluíste o objetivo ${objInfo?._titulo}, da área ${AREA_META[objInfo?._areaKey]?.nome} e trilho ${objInfo?._trilho}.`;
+
+          await addDoc(collection(db, "notificacoes"), {
+            agrupamentoId: profile.agrupamentoId || null,
+            secaoDocId: profile.secaoDocId || null,
+            uidElemento: objUid,
+            tipoAcao: "FELICITACAO",
+            descricao: textoMensagem,
+            createdAt: serverTimestamp(),
+            resolvida: false,
+          });
+
+          if (isUltimo) {
             const elemento = elementos.find(e => e.uid === objUid);
             await addDoc(collection(db, "notificacoes"), {
               agrupamentoId: profile.agrupamentoId || null,
               secaoDocId: profile.secaoDocId || null,
               tipoAcao: "ANILHA_MERITO",
-              descricao: `🏅 Elegível para Anilha de Mérito (100% dos Objetivos Concluídos)`,
+              descricao: "🏅 Elegível para Anilha de Mérito (100% dos Objetivos Concluídos)",
               elementoNome: elemento?.nome || objUid,
               uidElemento: objUid,
               patrulhaId: elemento?.patrulhaId || null,
               createdAt: serverTimestamp(),
-              resolvida: false
+              resolvida: false,
             });
           }
         }
       }
-    } catch (err) { alert("Erro ao guardar."); }
+    } catch (err) {
+      alert("Erro ao atualizar estado.");
+    }
   }
 
   async function salvarProgressoEmMassa() {
     if (readOnly || !progObj) return;
     const toAdd = [...progChecked].filter(uid => !progInitial.has(uid));
     const toRemove = [...progInitial].filter(uid => !progChecked.has(uid));
-    if (toAdd.length === 0 && toRemove.length === 0) { alert("Não há alterações para guardar."); return; }
+    if (toAdd.length === 0 && toRemove.length === 0) {
+      alert("Não há alterações para guardar.");
+      return;
+    }
     if (!window.confirm(`Vais atribuir o objetivo a ${toAdd.length} elemento(s) e removê-lo de ${toRemove.length}. Confirmar?`)) return;
 
     setLoading(true);
@@ -250,27 +273,50 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
       const batch = writeBatch(db);
       const objCat = catalogo.find(c => c.id === progObj);
 
-      toRemove.forEach(uid => { batch.delete(doc(db, `users/${uid}/objetivos/${progObj}`)); });
+      toRemove.forEach(uid => {
+        batch.delete(doc(db, `users/${uid}/objetivos/${progObj}`));
+      });
       toAdd.forEach(uid => {
-         batch.set(doc(db, `users/${uid}/objetivos/${progObj}`), { oportunidadeId: progObj, secao: secaoBase, titulo: objCat._titulo, area: objCat._areaKey, trilho: objCat._trilho, estado: "CONCLUIDO", bloqueado: true, concluidoAt: serverTimestamp(), updatedAt: serverTimestamp(), atribuidoPeloChefe: true });
+        batch.set(doc(db, `users/${uid}/objetivos/${progObj}`), {
+          oportunidadeId: progObj,
+          secao: secaoBase,
+          titulo: objCat._titulo,
+          area: objCat._areaKey,
+          trilho: objCat._trilho,
+          estado: "CONCLUIDO",
+          bloqueado: true,
+          concluidoAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          atribuidoPeloChefe: true,
+        });
       });
 
       await batch.commit();
 
-      let novos = [...objetivosUsers].filter(o => !(o.docId === progObj && toRemove.includes(o.uid))); 
+      let novos = [...objetivosUsers].filter(
+        o => !(o.docId === progObj && toRemove.includes(o.uid))
+      );
       toAdd.forEach(uid => {
-         const el = elementos.find(e => e.uid === uid);
-         novos.push({ uid, docId: progObj, estado: "CONCLUIDO", patrulhaId: el?.patrulhaId || "sem_grupo", isGuiaOuSub: el?.isGuia || el?.isSubGuia });
+        const el = elementos.find(e => e.uid === uid);
+        novos.push({
+          uid,
+          docId: progObj,
+          estado: "CONCLUIDO",
+          patrulhaId: el?.patrulhaId || "sem_grupo",
+          isGuiaOuSub: el?.isGuia || el?.isSubGuia,
+        });
       });
-      setObjetivosUsers(novos); 
-      setProgInitial(new Set(progChecked)); 
+      setObjetivosUsers(novos);
+      setProgInitial(new Set(progChecked));
 
       const catSize = catalogo.length;
       if (catSize > 0) {
         for (const uid of toAdd) {
           let countConcluidos = 1;
           objetivosUsers.forEach(o => {
-            if (o.uid === uid && o.docId !== progObj && o.estado === "CONCLUIDO") countConcluidos++;
+            if (o.uid === uid && o.docId !== progObj && o.estado === "CONCLUIDO") {
+              countConcluidos++;
+            }
           });
 
           if (countConcluidos === catSize) {
@@ -279,18 +325,23 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
               agrupamentoId: profile.agrupamentoId || null,
               secaoDocId: profile.secaoDocId || null,
               tipoAcao: "ANILHA_MERITO",
-              descricao: `🏅 Elegível para Anilha de Mérito (100% dos Objetivos Concluídos)`,
+              descricao: "🏅 Elegível para Anilha de Mérito (100% dos Objetivos Concluídos)",
               elementoNome: el?.nome || uid,
               uidElemento: uid,
               patrulhaId: el?.patrulhaId || null,
               createdAt: serverTimestamp(),
-              resolvida: false
+              resolvida: false,
             });
           }
         }
       }
+
       alert("Progresso atualizado com sucesso!");
-    } catch(err) { alert("Erro ao guardar progresso."); } finally { setLoading(false); }
+    } catch (err) {
+      alert("Erro ao guardar progresso.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   const radarData = useMemo(() => {
@@ -349,20 +400,20 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
           </div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <button className="az-btn" onClick={() => setShowArchiveModal(true)}>🗄️ Ver Arquivo</button>
-            {/* Pill de pendentes aqui... */}
           </div>
         </div>
       </div>
 
-      {/* 2. MURAL (Fica aqui, entre o cabeçalho e as abas) */}
+      {/* 2. MURAL */}
       <MuralOportunidades 
         profile={profile} contextoRole="CHEFE_UNIDADE"  
         onDistribute={readOnly ? null : (op) => setShareModal(op)} 
       />
 
-      {/* 3. ABAS E CONTEÚDO (Tabs, tabelas, etc.) */}
+      {/* 3. ABAS E CONTEÚDO */}
       <div className="az-tabs">
         {!readOnly && <button className={`az-tab ${tabAtual === "PENDENTES" ? "az-tab--active" : ""}`} onClick={() => setTabAtual("PENDENTES")}>🚨 Pendentes</button>}
+        <button className={`az-tab ${tabAtual === "AVALIACAO" ? "az-tab--active" : ""}`} onClick={() => setTabAtual("AVALIACAO")}>🎯 Em curso</button>
         <button className={`az-tab ${tabAtual === "SECÇÃO" ? "az-tab--active" : ""}`} onClick={() => setTabAtual("SECÇÃO")}>👁 Visão Geral</button>
         <button className={`az-tab ${tabAtual === "RADAR" ? "az-tab--active" : ""}`} onClick={() => setTabAtual("RADAR")}>📊 Radar Pedagógico</button>
         <button className={`az-tab ${tabAtual === "PROGRESSO" ? "az-tab--active" : ""}`} onClick={() => setTabAtual("PROGRESSO")}>📈 Progresso</button>
@@ -386,9 +437,27 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
                               <span className="az-area-badge" style={{ background: AREA_META[obj._areaKey]?.bg, color: AREA_META[obj._areaKey]?.text }}>{obj._codigo}</span>
                               <div style={{ flex: 1, minWidth: 200 }}><div style={{ fontWeight: 700, color: "var(--panel-text)" }}>{obj._titulo}</div><div className="az-small muted">Trilho: {obj._trilho}</div></div>
                               <div style={{ display: "flex", gap: 8 }}>
-                                <button className="az-btn az-btn-primary" onClick={() => alterarEstado(obj.uid, obj.docId, obj._titulo, "CONCLUIDO")}>🏅 Concluir</button>
-                                <button className="az-btn" style={{ borderColor: "rgba(255,107,107,.4)", color: "var(--danger)" }} onClick={() => alterarEstado(obj.uid, obj.docId, obj._titulo, "RECUSADO")}>❌ Recusar</button>
-                              </div>
+                              {obj.estado === "VALIDADO" && (
+                                <>
+                                  <button className="az-btn az-btn-primary" onClick={() => alterarEstado(obj.uid, obj.docId, obj._titulo, "CONFIRMADO")}>
+                                    ⚓ Confirmado
+                                  </button>
+                                  <button className="az-btn" style={{ color: "var(--danger)" }} onClick={() => alterarEstado(obj.uid, obj.docId, obj._titulo, "RECUSADO")}>
+                                    ❌ Recusar
+                                  </button>
+                                </>
+                              )}
+                              {obj.estado === "REALIZADO" && (
+                                <>
+                                  <button className="az-btn" style={{ background: "var(--brand-green)", color: "white" }} onClick={() => alterarEstado(obj.uid, obj.docId, obj._titulo, "CONCLUIDO")}>
+                                    🏅 Concluir
+                                  </button>
+                                  <button className="az-btn" onClick={() => alterarEstado(obj.uid, obj.docId, obj._titulo, "CONFIRMADO")}>
+                                    ↩️ Devolver ao Guia
+                                  </button>
+                                </>
+                              )}
+                            </div>
                             </div>
                           ))}
                         </div>
@@ -597,12 +666,12 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
             left: 0, 
             right: 0, 
             bottom: 0, 
-            backgroundColor: 'rgba(0, 0, 0, 0.8)', // Fundo escurecido
-            backdropFilter: 'blur(6px)',           // Efeito de desfoque
+            backgroundColor: 'rgba(0, 0, 0, 0.8)', 
+            backdropFilter: 'blur(6px)',           
             display: 'flex', 
             justifyContent: 'center', 
             alignItems: 'center', 
-            zIndex: 10000                          // Garante que fica por cima de tudo
+            zIndex: 10000                          
            }}>
           <div className="az-card" style={{ maxWidth: 500, width: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div className="az-card-inner">
@@ -656,12 +725,12 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
           left: 0, 
           right: 0, 
           bottom: 0, 
-          backgroundColor: 'rgba(0, 0, 0, 0.8)', // Fundo escurecido
-          backdropFilter: 'blur(6px)',           // Efeito de desfoque
+          backgroundColor: 'rgba(0, 0, 0, 0.8)', 
+          backdropFilter: 'blur(6px)',           
           display: 'flex', 
           justifyContent: 'center', 
           alignItems: 'center', 
-          zIndex: 10001                          // Um nível acima do arquivo, se necessário
+          zIndex: 10001                          
         }}>
         <div className="az-card" style={{ maxWidth: 400, width: '90%' }}>
           <div className="az-card-inner">
@@ -676,7 +745,87 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
         </div>
       </div>
     )}
+      {tabAtual === "AVALIACAO" && (
+        <div className="az-card">
+          <div className="az-card-inner">
+            <h3 className="az-h3">🎯 Objetivos Propostos</h3>
+            <p className="az-small az-muted" style={{ marginBottom: 20 }}>
+              Clica no objetivo que queres marcar como <b>CONCLUÍDO</b>.
+            </p>
 
+            {/* Seletor de Área */}
+            <div className="az-tabs" style={{ marginBottom: 20 }}>
+              {AREA_ORDER.map(a => (
+                <button key={a} className="az-tab" 
+                  style={{ 
+                    background: progArea === a ? AREA_META[a].bg : 'transparent',
+                    color: progArea === a ? '#fff' : 'inherit'
+                  }}
+                  onClick={() => setProgArea(a)}
+                >
+                  {AREA_META[a].nome}
+                </button>
+              ))}
+            </div>
+
+            {progArea && (
+              <div style={{ overflowX: 'auto' }}>
+                <table className="az-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '10px', borderBottom: '2px solid var(--stroke)' }}>Elemento</th>
+                      {catalogo.filter(c => c._areaKey === progArea).map(c => (
+                        <th key={c.id} title={c._titulo} style={{ padding: '10px', borderBottom: '2px solid var(--stroke)', textAlign: 'center' }}>
+                          {c._codigo}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {elementos.map(el => {
+                      const objMap = {};
+                      objetivosUsers.filter(o => o.uid === el.uid).forEach(o => objMap[o.docId] = o.estado);
+                      
+                      return (
+                        <tr key={el.uid} style={{ borderBottom: '1px solid var(--stroke)' }}>
+                          <td style={{ padding: '10px', fontWeight: 600 }}>{el.nome}</td>
+                          {catalogo.filter(c => c._areaKey === progArea).map(c => {
+                            const estado = objMap[c.id] || "NONE";
+                            const isConcluido = estado === "CONCLUIDO";
+                            const st = ESTADO_CORES[estado];
+                            
+                            return (
+                              <td key={c.id} style={{ textAlign: 'center', padding: '5px' }}>
+                                <button 
+                                  disabled={isConcluido || readOnly}
+                                  onClick={async () => {
+                                    if (window.confirm(`⚠️ Desejas marcar o objetivo [${c._codigo}] como CONCLUÍDO para ${el.nome}?\n\nEsta ação será registada no progresso.`)) {
+                                      await alterarEstado(el.uid, c.id, c._titulo, "CONCLUIDO");
+                                    }
+                                  }}
+                                  className="az-pill"
+                                  style={{ 
+                                    background: st.bg, color: st.color, border: st.border,
+                                    cursor: isConcluido ? 'default' : 'pointer',
+                                    opacity: estado === "NONE" ? 0.3 : 1,
+                                    width: '35px', padding: '4px 0', fontSize: '10px'
+                                  }}
+                                >
+                                  {isConcluido ? "✅" : c._codigo}
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

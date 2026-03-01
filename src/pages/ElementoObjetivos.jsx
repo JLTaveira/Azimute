@@ -4,7 +4,7 @@
 
 // src/pages/ElementoObjetivos.jsx
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDocs, getDoc, query, where, writeBatch, serverTimestamp, deleteDoc } from "firebase/firestore";
+import { collection, doc, getDocs, getDoc, query, where, writeBatch, serverTimestamp, deleteDoc, updateDoc } from "firebase/firestore";
 import { db, auth } from "../firebase";
 
 const AREA_META = {
@@ -45,6 +45,7 @@ export default function ElementoObjetivos({ profile }) {
   const [tabGlobal, setTabGlobal] = useState("MURAL"); // Abre no Mural por defeito
   const [mural, setMural] = useState([]);
   const [muralArquivado, setMuralArquivado] = useState([]);
+  const [felicitacoes, setFelicitacoes] = useState([]);
 
   const uid = auth.currentUser?.uid;
   const secao = secaoFromSecaoDocId(profile?.secaoDocId);
@@ -55,58 +56,78 @@ export default function ElementoObjetivos({ profile }) {
   const saudacaoNome = profile?.totem || profile?.nome?.split(" ")[0] || "Escuteiro";
   const detalheUnidade = `Clã ${profile?.secaoDocId?.split("_")[1] || "115"} • Agrupamento ${profile?.agrupamentoId?.split("_")[0] || "1104"} ${profile?.agrupamentoId?.split("_")[1] || "Paranhos"}`;
 
-  useEffect(() => {
-    let alive = true;
-    async function load() {
-      if (!uid || !secao || !profile?.agrupamentoId || !profile?.secaoDocId) { setLoading(false); return; }
-      setErr(""); setInfo(""); setLoading(true);
-      try {
-        // Carregamento Original
-        const catSnap = await getDocs(query(collection(db, "catalogoObjetivos"), where("secao", "==", secao)));
-        const progSnap = await getDocs(collection(db, "users", uid, "objetivos"));
-        const metaSnap = await getDoc(doc(db, "users", uid, "meta", "cicloProgresso"));
+    useEffect(() => {
+      let alive = true;
+      async function load() {
+        if (!uid || !secao || !profile?.agrupamentoId || !profile?.secaoDocId) { setLoading(false); return; }
+        setErr(""); setInfo(""); setLoading(true);
+        try {
+          // 1. Carregamentos originais (Catálogo, Progresso, Meta)
+          const catSnap = await getDocs(query(collection(db, "catalogoObjetivos"), where("secao", "==", secao)));
+          const progSnap = await getDocs(collection(db, "users", uid, "objetivos"));
+          const metaSnap = await getDoc(doc(db, "users", uid, "meta", "cicloProgresso"));
 
-        // Carregamento do Mural (Apenas MURAL)
-        const qMural = query(
-          collection(db, "oportunidades_agrupamento"),
-          where("agrupamentoId", "==", profile.agrupamentoId),
-          where("secaoDocId", "==", profile.secaoDocId),
-          where("destinatarios", "==", "MURAL")
+          // 2. Carregamento do Mural Geral
+          const qMural = query(
+            collection(db, "oportunidades_agrupamento"),
+            where("agrupamentoId", "==", profile.agrupamentoId),
+            where("secaoDocId", "==", profile.secaoDocId),
+            where("destinatarios", "==", "MURAL")
+          );
+          const muralSnap = await getDocs(qMural);
+          const todasOps = muralSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+          // 3. NOVO: Carregamento das Felicitações Pessoais
+          const qFelicita = query(
+            collection(db, "notificacoes"),
+            where("uidElemento", "==", uid),
+            where("tipoAcao", "==", "FELICITACAO"),
+            where("resolvida", "==", false)
+          );
+          const felicitaSnap = await getDocs(qFelicita);
+
+          if (!alive) return;
+
+          // Atualização dos Estados
+          setCatalogo(catSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+          setProgresso(progSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+          setCicloMeta(metaSnap.exists() ? metaSnap.data() : null);
+          
+          setMural(todasOps.filter(o => !o.arquivada));
+          setMuralArquivado(todasOps.filter(o => o.arquivada));
+
+          // Define as felicitações no estado criado no Passo 2
+          setFelicitacoes(felicitaSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+        } catch (e) { if (alive) setErr("Erro ao carregar dados: " + e.message); } 
+        finally { if (alive) setLoading(false); }
+      }
+      load();
+      return () => { alive = false; };
+    }, [uid, secao, profile?.agrupamentoId, profile?.secaoDocId, progresso.length]); 
+    // Nota: Adicionei progresso.length na dependência para atualizar se o elemento submeter algo novo
+
+    // --- Lógica de Memo dos Objetivos (Inalterada) ---
+    const progressoById = useMemo(() => { const m = new Map(); for (const p of progresso) m.set(p.id, p); return m; }, [progresso]);
+
+    const mergedItems = useMemo(() => catalogo.map(o => {
+      const p = progressoById.get(o.id);
+      const estadoRaw = p?.estado || ESTADOS.DISPONIVEL;
+      const bloqueado = !!p && (p.submetidoAt != null || [ESTADOS.VALIDADO, ESTADOS.REALIZADO, ESTADOS.CONFIRMADO, ESTADOS.CONCLUIDO].includes(estadoRaw));
+      return {
+        ...o, _oid: o.id, _codigo: extrairCodigo(o.id), _descricao: descCatalogo(o), _areaKey: areaToKey(o.areaDesenvolvimento),
+        _trilho: o.trilhoEducativo || "Sem trilho", _estadoRaw: estadoRaw, _estado: estadoVisivelAoElemento(estadoRaw),
+        _bloqueado: bloqueado, _podeSelecionar: (!p || estadoRaw === ESTADOS.RECUSADO) && !bloqueado,
+      };
+    }), [catalogo, progressoById]);
+
+    const items = useMemo(() => {
+    return mostrarTudo 
+      ? mergedItems 
+      : mergedItems.filter(x => 
+          [ESTADOS.ESCOLHA, ESTADOS.VALIDADO, ESTADOS.CONFIRMADO, ESTADOS.REALIZADO, ESTADOS.RECUSADO].includes(x._estadoRaw)
         );
-        const muralSnap = await getDocs(qMural);
-        const todasOps = muralSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-        if (!alive) return;
-        setCatalogo(catSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setProgresso(progSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setCicloMeta(metaSnap.exists() ? metaSnap.data() : null);
-
-        // Define Mural
-        setMural(todasOps.filter(o => !o.arquivada));
-        setMuralArquivado(todasOps.filter(o => o.arquivada));
-
-      } catch (e) { if (alive) setErr("Erro ao carregar dados: " + e.message); } 
-      finally { if (alive) setLoading(false); }
-    }
-    load();
-    return () => { alive = false; };
-  }, [uid, secao, profile?.agrupamentoId, profile?.secaoDocId]);
-
-  // --- Lógica de Memo dos Objetivos (Inalterada) ---
-  const progressoById = useMemo(() => { const m = new Map(); for (const p of progresso) m.set(p.id, p); return m; }, [progresso]);
-
-  const mergedItems = useMemo(() => catalogo.map(o => {
-    const p = progressoById.get(o.id);
-    const estadoRaw = p?.estado || ESTADOS.DISPONIVEL;
-    const bloqueado = !!p && (p.submetidoAt != null || [ESTADOS.VALIDADO, ESTADOS.REALIZADO, ESTADOS.CONFIRMADO, ESTADOS.CONCLUIDO].includes(estadoRaw));
-    return {
-      ...o, _oid: o.id, _codigo: extrairCodigo(o.id), _descricao: descCatalogo(o), _areaKey: areaToKey(o.areaDesenvolvimento),
-      _trilho: o.trilhoEducativo || "Sem trilho", _estadoRaw: estadoRaw, _estado: estadoVisivelAoElemento(estadoRaw),
-      _bloqueado: bloqueado, _podeSelecionar: (!p || estadoRaw === ESTADOS.RECUSADO) && !bloqueado,
-    };
-  }), [catalogo, progressoById]);
-
-  const items = useMemo(() => mostrarTudo ? mergedItems : mergedItems.filter(x => [ESTADOS.ESCOLHA, "EM_ANALISE", ESTADOS.CONFIRMADO, ESTADOS.CONCLUIDO, ESTADOS.RECUSADO].includes(x._estado)), [mergedItems, mostrarTudo]);
+   }, [mergedItems, mostrarTudo]);
 
   const grouped = useMemo(() => {
     const res = new Map(AREA_ORDER.map(a => [a, new Map()]));
@@ -217,12 +238,58 @@ export default function ElementoObjetivos({ profile }) {
           <div className="az-panel" style={{ background: "rgba(255,255,255,0.05)", padding: "12px 20px", borderRadius: "12px", marginBottom: 16 }}>
              <h3 style={{ margin: 0, color: "#fff", fontSize: "16px" }}>📢 O que anda a acontecer por aí?</h3>
           </div>
-          
+          {/* --- BLOCO DE FELICITAÇÕES --- */}
+          {felicitacoes.map(f => {
+            // Define o ícone e o texto do botão com base na mística da secção
+            let icone = "⚜️";
+            let lema = "Sempre Alerta";
+            
+            if (secao === "LOBITOS") {
+              icone = "🐺";
+              lema = "Da Melhor Vontade";
+            } else if (secao === "CAMINHEIROS") {
+              lema = "Sempre Alerta para Servir";
+            }
+
+            return (
+              <div key={f.id} className="az-card animate-fade-in" style={{ 
+                background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)", 
+                border: "2px solid var(--brand-teal)", 
+                marginBottom: 20 
+              }}>
+                <div className="az-card-inner" style={{ textAlign: "center", padding: "30px" }}>
+                  <div style={{ fontSize: "2.5rem", marginBottom: "15px" }}>🎉 {icone}</div>
+                  <p style={{ fontSize: "1.15rem", lineHeight: "1.6", color: "#fff", marginBottom: "24px", fontWeight: 500 }}>
+                    {f.descricao}
+                  </p>
+                  <button 
+                    className="az-btn az-btn-teal" 
+                    style={{ fontWeight: 800, padding: "12px 32px", fontSize: "1rem" }}
+                    onClick={async () => {
+                      try {
+                        // Atualiza a notificação na DB para "resolvida"
+                        await updateDoc(doc(db, "notificacoes", f.id), { 
+                          resolvida: true,
+                          resolvidaAt: serverTimestamp() 
+                        });
+                        // Remove do ecrã localmente
+                        setFelicitacoes(prev => prev.filter(item => item.id !== f.id));
+                      } catch (e) {
+                        console.error("Erro ao confirmar leitura:", e);
+                      }
+                    }}
+                  >
+                    {lema}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {mural.length === 0 ? (
               <div className="az-panel" style={{ textAlign: "center", padding: "60px 20px" }}>
                 <div style={{ fontSize: 40, opacity: 0.3, marginBottom: 16 }}>🍃</div>
-                <p className="az-muted">O mural está calmo por agora. <br/>Aguardamos novas comunicações da Chefia!</p>
+                <p className="az-muted" style={{ color: "var(--text-muted)" }}>Para já está tudo em dia!</p>
               </div>
             ) : (
               mural.map(op => (
@@ -328,7 +395,23 @@ export default function ElementoObjetivos({ profile }) {
                                 </button>
                               )}
                               {(estado === "EM_ANALISE" || estado === ESTADOS.CONFIRMADO || estado === ESTADOS.CONCLUIDO) && <span className="az-small" style={{ color: "#64748b" }}>🔒 Bloqueado pela Chefia</span>}
-                              {estado === ESTADOS.RECUSADO && <span className="az-small" style={{ color: "#ea580c", fontWeight: 800 }}>⚠️ Podes propor novamente</span>}
+                              {estado === ESTADOS.RECUSADO && (
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <span className="az-small" style={{ color: "#ea580c", fontWeight: 800 }}>⚠️ Podes tentar propor novamente</span>
+                                  <button 
+                                    className="az-btn" 
+                                    style={{ padding: "4px 10px", fontSize: 11, background: "var(--brand-orange)", color: "white", border: "none" }}
+                                    onClick={async () => {
+                                      if(window.confirm("Queres tentar propor este objetivo novamente?")){
+                                        await deleteDoc(doc(db, "users", uid, "objetivos", o._oid));
+                                        setProgresso(p => p.filter(x => x.id !== o._oid));
+                                      }
+                                    }}
+                                  >
+                                    🔄 Tentar Novamente
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </div>
                         );
