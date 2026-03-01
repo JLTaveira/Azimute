@@ -213,7 +213,7 @@ export default function GuiaObjetivosGrupo({ profile }) {
       {tabAtual === "VALIDAR" && (
         <div className="animate-fade-in">
           {Object.keys(grouped).length === 0 ? (
-            <div className="az-panel" style={{ textAlign: "center", padding: "60px 20px" }}><p className="az-muted">Tudo em dia!</p></div>
+            <div className="az-panel" style={{ textAlign: "center", padding: "60px 20px" }}><p className="az-muted" style={{ color: "var(--muted)" }}>Tudo em dia!</p></div>
           ) : (
             Object.values(grouped).map(group => (
               <div key={group.nome} className="az-card" style={{ marginBottom: 16 }}>
