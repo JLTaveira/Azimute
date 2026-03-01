@@ -16,6 +16,16 @@ const AREA_META = {
   SOCIAL: { nome: "Social", bg: "#eab308", text: "#000000", tint: "rgba(234,179,8,0.25)" },
 };
 
+const ESTADO_CORES = {
+  CONCLUIDO: { bg: "var(--brand-green)", color: "#fff", border: "none" },
+  CONFIRMADO: { bg: "#0ea5e9", color: "#fff", border: "none" }, // Azul para plano ativo
+  REALIZADO: { bg: "#8b5cf6", color: "#fff", border: "none" }, // Roxo para feito (aguarda chefe)
+  VALIDADO: { bg: "var(--brand-teal)", color: "#fff", border: "none" },
+  ESCOLHA: { bg: "rgba(23,154,171,0.2)", color: "var(--brand-teal)", border: "1px solid var(--brand-teal)" },
+  RECUSADO: { bg: "rgba(236,131,50,0.2)", color: "var(--brand-orange)", border: "1px dashed var(--brand-orange)" },
+  NONE: { bg: "rgba(255,255,255,0.05)", color: "var(--muted)", border: "1px dashed rgba(255,255,255,0.2)" }
+};
+
 const AREA_ORDER = ["FISICO", "AFETIVO", "CARACTER", "ESPIRITUAL", "INTELECTUAL", "SOCIAL"];
 const ESTADOS = { DISPONIVEL: "DISPONIVEL", ESCOLHA: "ESCOLHA", VALIDADO: "VALIDADO", CONFIRMADO: "CONFIRMADO", REALIZADO: "REALIZADO", CONCLUIDO: "CONCLUIDO", RECUSADO: "RECUSADO" };
 
@@ -325,7 +335,55 @@ export default function ElementoObjetivos({ profile }) {
               </button>
             </div>
           </div>
+          <div className="az-card" style={{ marginBottom: 8 }}>
+            <div className="az-card-inner">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h3 className="az-h3" style={{ margin: 0, fontSize: '1rem' }}>📊 A minha Pista</h3>
+                <span className="az-pill" style={{ background: 'var(--brand-teal)', color: '#fff', fontSize: '10px' }}>
+                  {progresso.filter(p => p.estado === "CONCLUIDO").length} concluídos
+                </span>
+              </div>
 
+              <div className="az-grid" style={{ gap: 10 }}>
+                {AREA_ORDER.map(a => {
+                  // Filtra os itens do catálogo para esta área 
+                  const catItems = catalogo.filter(c => areaToKey(c.areaDesenvolvimento) === a);
+                  if (!catItems.length) return null;
+
+                  return (
+                    <div key={a} style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 4 }}>
+                      <div style={{ width: 100, fontSize: 10, fontWeight: 900, color: AREA_META[a].bg, textTransform: "uppercase" }}>
+                        {AREA_META[a].nome}
+                      </div>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", flex: 1 }}>
+                        {catItems
+                          .sort((x, y) => extrairCodigo(x.id).localeCompare(extrairCodigo(y.id), undefined, {numeric: true}))
+                          .map(c => {
+                            // Procura o progresso atual para este objetivo 
+                            const p = progresso.find(pr => pr.id === c.id);
+                            const estadoRaw = p?.estado || "NONE";
+                            const st = ESTADO_CORES[estadoRaw];
+                            
+                            return (
+                              <div 
+                                key={c.id} 
+                                title={`${extrairCodigo(c.id)} - ${descCatalogo(c)}`}
+                                style={{ 
+                                  background: st.bg, color: st.color, border: st.border, 
+                                  padding: "3px 8px", fontSize: 10, fontWeight: 800, borderRadius: 4 
+                                }}
+                              >
+                                {extrairCodigo(c.id)}
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
           {err && <div className="az-error-msg">{err}</div>}
           {info && <div className="az-alert az-alert--ok" style={{ background: "rgba(22,163,74,0.15)", color: "#4ade80", padding: 12, borderRadius: 8 }}>{info}</div>}
 

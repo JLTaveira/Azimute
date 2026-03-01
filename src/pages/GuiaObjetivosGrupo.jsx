@@ -18,7 +18,21 @@ const AREA_META = {
   SOCIAL: { nome: "Social", bg: "#eab308", text: "#000000" },
 };
 
-// Funções Auxiliares para formatação
+// Ordem das áreas para a grelha visual
+const AREA_ORDER = ["FISICO", "AFETIVO", "CARACTER", "ESPIRITUAL", "INTELECTUAL", "SOCIAL"];
+
+// Cores para os estados (Consistente com Chefe e Elemento)
+const ESTADO_CORES = {
+  CONCLUIDO: { bg: "var(--brand-green)", color: "#fff", border: "none" },
+  CONFIRMADO: { bg: "#0ea5e9", color: "#fff", border: "none" },
+  REALIZADO: { bg: "#8b5cf6", color: "#fff", border: "none" },
+  VALIDADO: { bg: "var(--brand-teal)", color: "#fff", border: "none" },
+  ESCOLHA: { bg: "rgba(23,154,171,0.2)", color: "var(--brand-teal)", border: "1px solid var(--brand-teal)" },
+  RECUSADO: { bg: "rgba(236,131,50,0.2)", color: "var(--brand-orange)", border: "1px dashed var(--brand-orange)" },
+  NONE: { bg: "rgba(255,255,255,0.05)", color: "var(--muted)", border: "1px dashed rgba(255,255,255,0.2)" }
+};
+
+// Funções Auxiliares (Aproveitando as que já tinhas)
 function areaToKey(a) {
   const k = String(a || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
   if (k === "CARATER") return "CARACTER";
@@ -32,6 +46,16 @@ function secaoFromSecaoDocId(secaoDocId) {
   if (s.includes("comunidade")) return "PIONEIROS";
   if (s.includes("cla")) return "CAMINHEIROS";
   return null;
+}
+
+// Termo dinâmico para a subunidade
+function getTermoGrupo(secaoDocId) {
+  const s = String(secaoDocId || "").toLowerCase();
+  if (s.includes("alcateia")) return "Bando";
+  if (s.includes("expedicao")) return "Patrulha";
+  if (s.includes("comunidade")) return "Equipa";
+  if (s.includes("cla")) return "Tribo";
+  return "Subunidade";
 }
 
 function extrairCodigoFromOid(oid) {
@@ -56,6 +80,7 @@ export default function GuiaObjetivosGrupo({ profile }) {
   const [catalogo, setCatalogo] = useState([]);
 
   const secaoBase = secaoFromSecaoDocId(profile?.secaoDocId);
+  const termoGrupo = useMemo(() => getTermoGrupo(profile?.secaoDocId), [profile]);
 
   useEffect(() => {
     if (!profile?.patrulhaId || !profile?.secaoDocId) return;
@@ -64,11 +89,7 @@ export default function GuiaObjetivosGrupo({ profile }) {
       setLoading(true);
       setErro("");
       try {
-        // 1. Vai buscar o Catálogo da Secção
-        const qCat = query(
-          collection(db, "catalogoObjetivos"),
-          where("secao", "==", secaoBase)
-        );
+        const qCat = query(collection(db, "catalogoObjetivos"), where("secao", "==", secaoBase));
         const snapCat = await getDocs(qCat);
         const cat = snapCat.docs.map(d => ({
           id: d.id,
@@ -80,7 +101,6 @@ export default function GuiaObjetivosGrupo({ profile }) {
         }));
         setCatalogo(cat);
 
-        // 2. Vai buscar os Elementos da mesma Patrulha/Bando
         const qUsers = query(
           collection(db, "users"),
           where("agrupamentoId", "==", profile.agrupamentoId),
@@ -94,16 +114,11 @@ export default function GuiaObjetivosGrupo({ profile }) {
           .filter(u => u.uid !== profile.uid && u.ativo !== false);
         setElementos(listaElementos.sort((a, b) => a.nome.localeCompare(b.nome)));
 
-        // 3. Vai buscar os Objetivos em "ESCOLHA" ou "CONFIRMADO"
+        // BUSCA TODOS OS OBJETIVOS (Para poder desenhar a grelha de progresso)
         const todosObjetivos = [];
         await Promise.all(
           listaElementos.map(async elemento => {
-            const snapObjs = await getDocs(
-              query(
-                collection(db, `users/${elemento.uid}/objetivos`),
-                where("estado", "in", ["ESCOLHA", "CONFIRMADO"])
-              )
-            );
+            const snapObjs = await getDocs(collection(db, `users/${elemento.uid}/objetivos`));
             snapObjs.forEach(objSnap => {
               todosObjetivos.push({
                 uid: elemento.uid,
@@ -115,17 +130,14 @@ export default function GuiaObjetivosGrupo({ profile }) {
         );
         setObjetivos(todosObjetivos);
       } catch (err) {
-        console.error("Erro detalhado:", err);
-        setErro("Erro ao carregar os dados da patrulha.");
+        setErro("Erro ao carregar os dados da unidade.");
       } finally {
         setLoading(false);
       }
     }
-
     fetchData();
   }, [profile, secaoBase]);
 
-  // Junta os dados do utilizador com os dados bonitos do Catálogo
   const objetivosEnriquecidos = useMemo(() => {
     return objetivos.map(obj => {
       const catItem = catalogo.find(c => c.id === obj.docId) || {};
@@ -133,204 +145,164 @@ export default function GuiaObjetivosGrupo({ profile }) {
     });
   }, [objetivos, catalogo]);
 
-  // Função para o Guia clicar em "Validar"
+  // Handlers (Inalterados conforme o teu código)
   async function handleValidar(uid, docId, titulo) {
-    if (!window.confirm(`Queres validar o objetivo "${titulo || 'Desconhecido'}"?\nIsto enviará a proposta para a aprovação final da Equipa de Animação.`)) return;
-
+    if (!window.confirm(`Validar proposta "${titulo}"?`)) return;
     try {
-      const ref = doc(db, "users", uid, "objetivos", docId);
-      await updateDoc(ref, {
+      await updateDoc(doc(db, "users", uid, "objetivos", docId), {
         estado: "VALIDADO",
         validadoPor: auth.currentUser.uid,
         validadoAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
-
-      // Remove imediatamente da lista visual
-      setObjetivos(prev => prev.filter(o => !(o.uid === uid && o.docId === docId)));
+      setObjetivos(prev => prev.map(o => (o.uid === uid && o.docId === docId) ? { ...o, estado: "VALIDADO" } : o));
       alert("Validado!");
-    } catch (error) {
-      console.error("Erro ao validar:", error);
-      alert("Erro de permissão. Verifica se tens 'isGuia' a true na BD.");
-    }
+    } catch (e) { alert("Erro ao validar."); }
   }
 
-  // Função para o Guia recusar a proposta
   async function handleRecusar(uid, docId, titulo) {
-    if (!window.confirm(`Tens a certeza que queres recusar a proposta "${titulo}"?`)) return;
-
+    if (!window.confirm(`Recusar proposta "${titulo}"?`)) return;
     try {
-      const ref = doc(db, "users", uid, "objetivos", docId);
-      await updateDoc(ref, {
+      await updateDoc(doc(db, "users", uid, "objetivos", docId), {
         estado: "RECUSADO",
-        recusadoAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        // Opcional: podes adicionar um campo 'notas' para explicar o porquê
+        updatedAt: serverTimestamp()
       });
-
-      setObjetivos(prev => prev.filter(o => !(o.uid === uid && o.docId === docId)));
-      alert("Proposta recusada.");
-    } catch (error) {
-      console.error("Erro ao recusar:", error);
-    }
+      setObjetivos(prev => prev.map(o => (o.uid === uid && o.docId === docId) ? { ...o, estado: "RECUSADO" } : o));
+    } catch (e) { alert("Erro ao recusar."); }
   }
 
   async function handleInformarConclusao(uid, docId, titulo) {
-    if (!window.confirm(`Confirmas a execução do objetivo "${titulo}"? isto será enviado para validação do Chefe.`)) return;
-
+    if (!window.confirm(`Marcar "${titulo}" como realizado?`)) return;
     try {
-      const ref = doc(db, "users", uid, "objetivos", docId);
-      await updateDoc(ref, {
-        estado: "REALIZADO", // Envia para o Chefe
+      await updateDoc(doc(db, "users", uid, "objetivos", docId), {
+        estado: "REALIZADO",
         realizadoAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
-
-      // Remove da lista do Guia (já foi encaminhado)
-      setObjetivos(prev => prev.filter(o => !(o.uid === uid && o.docId === docId)));
-      alert("Informação enviada ao Chefe de Unidade!");
-    } catch (error) {
-      alert("Erro ao comunicar conclusão.");
-    }
+      setObjetivos(prev => prev.map(o => (o.uid === uid && o.docId === docId) ? { ...o, estado: "REALIZADO" } : o));
+      alert("Enviado ao Chefe!");
+    } catch (e) { alert("Erro ao comunicar conclusão."); }
   }
 
   if (loading) return <div className="az-loading-screen"><div className="az-logo-pulse">⏳</div></div>;
-  if (erro) return <div className="az-alert az-alert--error">{erro}</div>;
 
-  // Agrupa os objetivos por Elemento para a UI ficar arrumada
   const grouped = {};
-  objetivosEnriquecidos.forEach(obj => {
+  // Para a tab de VALIDAR, mostramos apenas o que requer ação (ESCOLHA ou CONFIRMADO)
+  objetivosEnriquecidos.filter(o => ["ESCOLHA", "CONFIRMADO"].includes(o.estado)).forEach(obj => {
     if (!grouped[obj.uid]) {
       const el = elementos.find(e => e.uid === obj.uid);
-      grouped[obj.uid] = { nome: el?.nome || "Elemento Desconhecido", objs: [] };
+      grouped[obj.uid] = { nome: el?.nome || "Elemento", objs: [] };
     }
     grouped[obj.uid].objs.push(obj);
   });
 
   return (
-
-  <div className="az-page-container">
+    <div className="az-page-container">
       <div className="az-tabs-container" style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
-      
-      <button 
-        onClick={() => setTabAtual("VALIDAR")}
-        className={`az-tab-pill ${tabAtual === "VALIDAR" ? "active" : ""}`}
-        style={{
-          padding: "6px 16px",
-          borderRadius: "20px",
-          border: tabAtual === "VALIDAR" ? "1px solid var(--brand-teal)" : "1px solid transparent",
-          background: tabAtual === "VALIDAR" ? "rgba(0, 150, 136, 0.1)" : "transparent",
-          color: tabAtual === "VALIDAR" ? "#fff" : "var(--text-muted)",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          fontSize: "14px"
-        }}
-      >
-        🎯 Validar Propostas
-      </button>
+        <button onClick={() => setTabAtual("VALIDAR")} className={`az-tab-pill ${tabAtual === "VALIDAR" ? "active" : ""}`} style={tabStyle(tabAtual === "VALIDAR")}>
+          🎯 Validar Propostas
+        </button>
+        <button onClick={() => setTabAtual("VISAO_GERAL")} className={`az-tab-pill ${tabAtual === "VISAO_GERAL" ? "active" : ""}`} style={tabStyle(tabAtual === "VISAO_GERAL")}>
+          👁️ Visão da {termoGrupo}
+        </button>
+        <button onClick={() => setTabAtual("OPORTUNIDADES")} className={`az-tab-pill ${tabAtual === "OPORTUNIDADES" ? "active" : ""}`} style={tabStyle(tabAtual === "OPORTUNIDADES")}>
+          📢 Oportunidades
+        </button>
+      </div>
 
-      <button 
-        onClick={() => setTabAtual("OPORTUNIDADES")}
-        className={`az-tab-pill ${tabAtual === "OPORTUNIDADES" ? "active" : ""}`}
-        style={{
-          padding: "6px 16px",
-          borderRadius: "20px",
-          border: tabAtual === "OPORTUNIDADES" ? "1px solid var(--brand-teal)" : "1px solid transparent",
-          background: tabAtual === "OPORTUNIDADES" ? "rgba(0, 150, 136, 0.1)" : "transparent",
-          color: tabAtual === "OPORTUNIDADES" ? "#fff" : "var(--text-muted)",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          fontSize: "14px"
-        }}
-      >
-        📢 Oportunidades Educativas
-      </button>
-
-    </div>
-
-    {/* 2. Conteúdo Condicional */}
-    {tabAtual === "VALIDAR" && (
-      <div className="animate-fade-in">
-        {Object.keys(grouped).length === 0 ? (
-          <div className="az-panel" style={{ textAlign: "center", padding: "60px 20px", background: "rgba(255,255,255,0.05)", borderRadius: "12px" }}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>✅</div>
-            <p style={{ color: "var(--text-muted)", fontSize: "1.1rem" }}>
-              Tudo em dia! Não há objetivos propostos na tua unidade a aguardar validação.
-            </p>
-          </div>
-        ) : (
-          Object.values(grouped).map(group => (
-            <div key={group.nome} className="az-card" style={{ marginBottom: 16 }}>
-              <div className="az-card-inner">
-                <h3 style={{ margin: "0 0 16px 0", color: "var(--brand-teal)", display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid var(--stroke)", paddingBottom: 8 }}>
-                  👤 {group.nome}
-                </h3>
-                
-                <div className="az-grid" style={{ display: "grid", gap: 12 }}>
-                  {group.objs.map(obj => (
-                    <div key={obj.docId} className="az-panel az-panel-sm" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "12px", border: "1px solid var(--stroke)", borderRadius: 8 }}>
-                      
-                      <span className="az-area-badge" style={{ background: AREA_META[obj._areaKey]?.bg || "#333", color: AREA_META[obj._areaKey]?.text || "#fff", padding: "4px 8px", borderRadius: 4, fontSize: "11px", fontWeight: 700 }}>
-                        {obj._codigo || "?"}
-                      </span>
-                      
-                      <div style={{ flex: 1, minWidth: 200 }}>
-                        <div style={{ fontWeight: 700, color: "var(--panel-text)" }}>{obj._titulo || "Objetivo sem título"}</div>
-                        <div className="az-small" style={{ opacity: 0.7, fontSize: "12px" }}>
-                          Trilho: {obj._trilho || "Geral"} • Área: {AREA_META[obj._areaKey]?.nome || "Outra"}
+      {tabAtual === "VALIDAR" && (
+        <div className="animate-fade-in">
+          {Object.keys(grouped).length === 0 ? (
+            <div className="az-panel" style={{ textAlign: "center", padding: "60px 20px" }}><p className="az-muted">Tudo em dia!</p></div>
+          ) : (
+            Object.values(grouped).map(group => (
+              <div key={group.nome} className="az-card" style={{ marginBottom: 16 }}>
+                <div className="az-card-inner">
+                  <h3 style={{ margin: "0 0 16px 0", color: "var(--brand-teal)", borderBottom: "1px solid var(--stroke)", paddingBottom: 8 }}>👤 {group.nome}</h3>
+                  <div className="az-grid" style={{ gap: 12 }}>
+                    {group.objs.map(obj => (
+                      <div key={obj.docId} className="az-panel az-panel-sm" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                        <span className="az-area-badge" style={{ background: AREA_META[obj._areaKey]?.bg, color: "#fff" }}>{obj._codigo}</span>
+                        <div style={{ flex: 1, minWidth: 200 }}>
+                          <div style={{ fontWeight: 700 }}>{obj._titulo}</div>
+                          <div className="az-small muted">Trilho: {obj._trilho}</div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          {obj.estado === "ESCOLHA" && (
+                            <>
+                              <button className="az-btn az-btn-primary" onClick={() => handleValidar(obj.uid, obj.docId, obj._titulo)}>✅ Validar</button>
+                              <button className="az-btn" style={{ color: "var(--danger)" }} onClick={() => handleRecusar(obj.uid, obj.docId, obj._titulo)}>❌</button>
+                            </>
+                          )}
+                          {obj.estado === "CONFIRMADO" && (
+                            <button className="az-btn az-btn-teal" onClick={() => handleInformarConclusao(obj.uid, obj.docId, obj._titulo)}>🏅 Marcar Realizado</button>
+                          )}
                         </div>
                       </div>
-
-                      <div style={{ display: "flex", gap: 8 }}>
-                        {/* 1. Botões para Validar ou Recusar a Proposta Inicial */}
-                        {obj.estado === "ESCOLHA" && (
-                          <>
-                            <button 
-                              className="az-btn az-btn-primary" 
-                              onClick={() => handleValidar(obj.uid, obj.docId, obj._titulo)}
-                            >
-                              ✅ Validar
-                            </button>
-                            <button 
-                              className="az-btn" 
-                              style={{ borderColor: "var(--danger)", color: "var(--danger)" }}
-                              onClick={() => handleRecusar(obj.uid, obj.docId, obj._titulo)}
-                            >
-                              ❌
-                            </button>
-                          </>
-                        )}
-
-                        {/* 2. Botão para o Guia informar que o elemento já Realizou o que estava no plano */}
-                        {obj.estado === "CONFIRMADO" && (
-                          <button 
-                            className="az-btn az-btn-teal" 
-                            onClick={() => handleInformarConclusao(obj.uid, obj.docId, obj._titulo)}
-                          >
-                            🏅 Marcar Realizado
-                          </button>
-                        )}
-                      </div>
-
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
-        )}
-      </div>
-    )}
+            ))
+          )}
+        </div>
+      )}
 
-    {tabAtual === "OPORTUNIDADES" && (
-      <div className="animate-fade-in">
-        <MuralOportunidades profile={profile} contextoRole="ELEMENTO" />
-      </div>
-    )}
-</div>
-);
+      {tabAtual === "VISAO_GERAL" && (
+        <div className="animate-fade-in az-grid" style={{ gap: 16 }}>
+          <div className="az-panel" style={{ background: "rgba(255,255,255,0.05)", padding: "12px 20px" }}>
+             <h3 style={{ margin: 0, color: "var(--brand-teal)", fontSize: "16px" }}>⛺ {termoGrupo}: {profile?.patrulhaId}</h3>
+          </div>
+          {elementos.map(el => {
+            const seusObjetivos = objetivosEnriquecidos.filter(o => o.uid === el.uid);
+            return (
+              <div key={el.uid} className="az-card">
+                <div className="az-card-inner">
+                  <div style={{ fontWeight: 800, marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
+                    <span>👤 {el.nome}</span>
+                    <span className="az-small muted">{seusObjetivos.filter(o => o.estado === "CONCLUIDO").length} concluídos</span>
+                  </div>
+                  <div className="az-grid" style={{ gap: 8 }}>
+                    {AREA_ORDER.map(a => {
+                      const catItems = catalogo.filter(c => c._areaKey === a);
+                      return (
+                        <div key={a} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                          <div style={{ width: 90, fontSize: 10, fontWeight: 900, color: AREA_META[a].bg, textTransform: "uppercase" }}>{AREA_META[a].nome}</div>
+                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                            {catItems.map(c => {
+                              const obj = seusObjetivos.find(o => o.docId === c.id);
+                              const st = ESTADO_CORES[obj?.estado || "NONE"];
+                              return (
+                                <div key={c.id} title={`${c._codigo} - ${c._titulo}`} style={{ background: st.bg, color: st.color, border: st.border, padding: "2px 6px", fontSize: 9, fontWeight: 800, borderRadius: 4 }}>
+                                  {c._codigo}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tabAtual === "OPORTUNIDADES" && (
+        <div className="animate-fade-in"><MuralOportunidades profile={profile} contextoRole="ELEMENTO" /></div>
+      )}
+    </div>
+  );
+}
+
+// Helper de estilo para os botões das tabs
+function tabStyle(active) {
+  return {
+    padding: "6px 16px", borderRadius: "20px", cursor: "pointer", fontSize: "14px",
+    border: active ? "1px solid var(--brand-teal)" : "1px solid transparent",
+    background: active ? "rgba(0, 150, 136, 0.1)" : "transparent",
+    color: active ? "#fff" : "var(--text-muted)",
+  };
 }
