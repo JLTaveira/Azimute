@@ -253,7 +253,7 @@ export default function MuralOportunidades({ profile, onDistribute, contextoRole
                   style={{ 
                     marginBottom: 8, overflow: "hidden", display: "-webkit-box", 
                     WebkitLineClamp: expandidoId === op.id ? "unset" : "3", 
-                    WebkitBoxOrient: "vertical", color: "var(--text-muted)", lineHeight: "1.4"
+                    WebkitBoxOrient: "vertical", color: "rgba(255, 255, 255, 0.9)", lineHeight: "1.4"
                   }}
                   dangerouslySetInnerHTML={{ __html: op.descricao }}
                 />
