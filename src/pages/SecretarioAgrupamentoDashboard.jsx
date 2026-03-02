@@ -55,6 +55,14 @@ function sortSecoes(a, b) {
 }
 
 export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
+  
+  // extrai o número do agrupamento no formato 0000
+  const prefixoAgrupamento = useMemo(() => {
+    if (!profile?.agrupamentoId) return "0000";
+    const num = profile.agrupamentoId.split("_")[0];
+    return num.padStart(4, '0');
+  }, [profile]);
+
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
   const [filtro, setFiltro] = useState("PENDENTES");
@@ -190,9 +198,13 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
   async function handleShareSubmit(e) {
     e.preventDefault();
     if (readOnly) return;
-    if (shareTargets.length === 0) return alert("Selecione um grupo de destino.");
+    if (shareTargets.length === 0) return alert("Selecione destinatários.");
     try {
       const docId = `${profile.agrupamentoId}_${shareModal.id}`;
+      
+      // Gera as tags no formato 0000_sufixo (ex: 1104_dirigente)
+      const tagsNormalizadas = shareTargets.map(sufixo => `${prefixoAgrupamento}_${sufixo}`);
+      
       await setDoc(doc(db, "oportunidades_agrupamento", docId), {
         agrupamentoId: profile.agrupamentoId,
         padletId: shareModal.id,
@@ -200,13 +212,25 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
         descricao: shareModal.descricao,
         link: shareModal.link,
         colunaOriginal: shareModal.coluna,
-        alvos: shareTargets,
-        dataFim: shareDataFim || null,
-        partilhadoPor: auth.currentUser.uid,
-        partilhadoEm: serverTimestamp()
+        alvos: tagsNormalizadas, 
+        autor: profile.nome,
+        autorCargo: "SECRETARIO AGRUPAMENTO",
+        createdAt: serverTimestamp(),
+        // Define o início como agora e garante que o fim é uma String ISO
+        dataInicio: new Date().toISOString(),
+        dataFim: shareDataFim ? new Date(shareDataFim).toISOString() : null,
+        // Define se é MURAL (p/ todos), GUIAS ou DIRIGENTES conforme os alvos
+        destinatarios: shareTargets.some(t => ["agrupamento", "alcateia", "expedicao", "comunidade", "cla"].includes(t)) ? "MURAL" : 
+                       (shareTargets.includes("guias") ? "GUIAS" : "DIRIGENTES"),
+        arquivada: false
       });
-      alert("Distribuído!"); setShareModal(null); setShareTargets([]); setShareDataFim(""); fetchDadosSecretaria();
-    } catch (error) { alert("Erro ao distribuir."); }
+
+      alert("Oportunidade distribuída com sucesso!"); 
+      setShareModal(null); setShareTargets([]); setShareDataFim(""); fetchDadosSecretaria();
+    } catch (error) { 
+      console.error(error);
+      alert("Erro ao distribuir."); 
+    }
   }
 
   // --- FUNÇÕES DE GESTÃO ---
@@ -643,12 +667,14 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
                   <label>Público Alvo (Responsáveis):</label>
                   <div style={{ display: "grid", gap: 8, background: "rgba(0,0,0,0.2)", padding: 12, borderRadius: 8 }}>
                     {[
-                      { id: "DIRECAO", label: "Toda a Direção (Conselho)" },
-                      { id: "CHEFE_AGRUPAMENTO", label: "Chefe de Agrupamento" },
-                      { id: "LOBITOS", label: "Chefe de Unidade (Alcateia)" },
-                      { id: "EXPLORADORES", label: "Chefe de Unidade (Expedição)" },
-                      { id: "PIONEIROS", label: "Chefe de Unidade (Comunidade)" },
-                      { id: "CAMINHEIROS", label: "Chefe de Unidade (Clã)" }
+                      { id: "direcao", label: "👔 Direção" },
+                      { id: "dirigente", label: "👥 Adultos" },
+                      { id: "agrupamento", label: "📢 Agrupamento" },
+                      { id: "guias", label: "⚜️ Guias (+ Equipas Animação)" },
+                      { id: "alcateia", label: "🐺 Alcateia (CU)" },
+                      { id: "expedicao", label: "🧴 Expedição (CU)" },
+                      { id: "comunidade", label: "🧭 Comunidade (CU" },
+                      { id: "cla", label: "🎒 Clã (CU)" }
                     ].map(alvo => (
                       <label key={alvo.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                         <input

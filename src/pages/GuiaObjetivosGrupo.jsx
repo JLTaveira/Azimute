@@ -205,9 +205,6 @@ export default function GuiaObjetivosGrupo({ profile }) {
         <button onClick={() => setTabAtual("VISAO_GERAL")} className={`az-tab-pill ${tabAtual === "VISAO_GERAL" ? "active" : ""}`} style={tabStyle(tabAtual === "VISAO_GERAL")}>
           👁️ Visão da {termoGrupo}
         </button>
-        <button onClick={() => setTabAtual("OPORTUNIDADES")} className={`az-tab-pill ${tabAtual === "OPORTUNIDADES" ? "active" : ""}`} style={tabStyle(tabAtual === "OPORTUNIDADES")}>
-          📢 Oportunidades
-        </button>
       </div>
 
       {tabAtual === "VALIDAR" && (
@@ -288,10 +285,6 @@ export default function GuiaObjetivosGrupo({ profile }) {
             );
           })}
         </div>
-      )}
-
-      {tabAtual === "OPORTUNIDADES" && (
-        <div className="animate-fade-in"><MuralOportunidades profile={profile} contextoRole="ELEMENTO" /></div>
       )}
     </div>
   );

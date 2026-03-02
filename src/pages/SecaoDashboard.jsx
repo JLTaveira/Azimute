@@ -3,9 +3,10 @@ src/pages/SecaoDashboard.jsx
  2026-02-17 - Joao Taveira (jltaveira@gmail.com) */
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDoc, getDocs, query, where, updateDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where, updateDoc, serverTimestamp, setDoc, addDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, auth, functions } from "../firebase";
+import MuralOportunidades from "../components/MuralOportunidades";
 
 import pataTenra from "../assets/patatenra.png";
 import loboValente from "../assets/lobovalente.png";
@@ -57,6 +58,7 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
   const [errMembros, setErrMembros] = useState("");
   const [info, setInfo] = useState("");
   const [resettingUid, setResettingUid] = useState(null);
+  const [shareModal, setShareModal] = useState(null);
 
   const agrupamentoId = profile?.agrupamentoId;
   const secaoDocId = profile?.secaoDocId;
@@ -64,6 +66,7 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
   const souChefeUnidade = souDirigente && hasFuncao(profile, "CHEFE_UNIDADE");
   const souGuia = isElemento(profile) && isGuia(profile);
   const souSubGuia = isElemento(profile) && isSubGuia(profile);
+  const cargoMural = souChefeUnidade ? "CHEFE_UNIDADE" : "DIRIGENTE";
   const podeAbrirObjetivosGrupo = souChefeUnidade || souGuia || souSubGuia;
 
   const sec = (secaoDocId || "").toLowerCase();
@@ -181,6 +184,34 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
   const funcaoId = funcaoPrincipal(profile?.funcoes || []);
   const funcaoSrc = funcaoId ? funcaoImgMap[funcaoId] : null;
 
+  async function handleDistribuirInternamente(oportunidade, sufixoTag) {
+    try {
+      const sId = profile.secaoDocId; // O ID longo (ex: 1104cla)
+      const tagFinal = `${sId}${sufixoTag}`; // Gera 1104cla, 1104cla_GUIAS ou 1104cla_DIRIGENTES
+      
+      // Define o destinatário para o filtro automático do Mural unificado
+      let destino = "MURAL";
+      if (sufixoTag === "_GUIAS") destino = "GUIAS";
+      if (sufixoTag === "_DIRIGENTES") destino = "DIRIGENTES";
+
+      await addDoc(collection(db, "oportunidades_agrupamento"), {
+        ...oportunidade,
+        agrupamentoId: profile.agrupamentoId,
+        secaoDocId: sId,
+        alvos: [tagFinal], // A tag que os elementos da secção "ouvem"
+        autor: profile.nome,
+        destinatarios: destino,
+        createdAt: serverTimestamp(),
+        arquivada: false
+      });
+      
+      setShareModal(null);
+      alert("Informação partilhada com sucesso!");
+    } catch (e) {
+      alert("Erro ao partilhar.");
+    }
+  }
+
   return (
     <div className="az-grid" style={{ gap: 24 }}>
       {(errSecao || errSubs || errMembros) && ( <div className="az-alert az-alert--error">{errSecao && <div>{errSecao}</div>}{errSubs && <div>{errSubs}</div>}{errMembros && <div>{errMembros}</div>}</div> )}
@@ -212,6 +243,13 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
           )}
         </div>
       </div>
+
+          <MuralOportunidades 
+        profile={profile} 
+        contextoRole={cargoMural}
+        // Só permite partilhar se for o Chefe de Unidade
+        onDistribute={souChefeUnidade ? (op) => setShareModal(op) : null}
+      />
 
       {!souDirigente && !souChefeUnidade && !souGuia && !souSubGuia && (
         <div className="az-panel" style={{ textAlign: "center", padding: "40px 20px" }}><div style={{ fontSize: 40, opacity: 0.5 }}>🎯</div><h3 style={{ margin: "12px 0 4px" }}>O teu trilho está à tua espera</h3><p className="az-muted" style={{ margin: 0 }}>Usa o menu lateral para gerires os teus objetivos F.A.C.E.I.S.</p></div>
@@ -340,6 +378,25 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
           </div>
         </div>
       )}
+
+      {shareModal && (
+        <div className="az-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: 20 }}>
+          <div className="az-card" style={{ width: '100%', maxWidth: 400 }}>
+            <div className="az-card-inner">
+              <h3 style={{ color: 'var(--brand-teal)', marginBottom: 20 }}>📤 Partilhar com a Unidade</h3>
+              <p className="az-small muted" style={{ marginBottom: 20 }}>Enviar para: <b>{shareModal.titulo}</b></p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <button className="az-btn az-btn-primary" onClick={() => handleDistribuirInternamente(shareModal, "")}>🌍 Toda a Secção (Elementos)</button>
+                <button className="az-btn az-btn-teal" onClick={() => handleDistribuirInternamente(shareModal, "_GUIAS")}>⚜️ Só Guias e Sub-Guias</button>
+                <button className="az-btn" style={{ background: 'rgba(255,255,255,0.05)' }} onClick={() => handleDistribuirInternamente(shareModal, "_DIRIGENTES")}>👔 Só Equipa de Animação</button>
+                <button className="az-btn-text" style={{ marginTop: 8 }} onClick={() => setShareModal(null)}>Cancelar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

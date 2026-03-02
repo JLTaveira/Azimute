@@ -69,9 +69,7 @@ function descricaoDoCatalogo(o) {
 
 export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
   const [tabAtual, setTabAtual] = useState(readOnly ? "SECÇÃO" : "PENDENTES");
-  const [showArchiveModal, setShowArchiveModal] = useState(false);
-  const [oportunidadesUnit, setOportunidadesUnit] = useState([]);
-  const [ocultosUnit, setOcultosUnit] = useState([]);
+  
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
   
@@ -79,8 +77,6 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
   const [objetivosUsers, setObjetivosUsers] = useState([]);
   const [catalogo, setCatalogo] = useState([]);
   const [mapaSubunidades, setMapaSubunidades] = useState({});
-
-  const [shareModal, setShareModal] = useState(null);
 
   const [progArea, setProgArea] = useState("");
   const [progObj, setProgObj] = useState("");
@@ -130,24 +126,6 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
     fetchData();
   }, [profile, secaoBase]);
 
-  useEffect(() => {
-    if (!profile?.agrupamentoId || tabAtual !== "OPORTUNIDADES") return;
-
-    async function fetchOportunidadesUnidade() {
-      try {
-        const q = query(
-          collection(db, "oportunidades_agrupamento"),
-          where("agrupamentoId", "==", profile.agrupamentoId),
-          where("alvos", "array-contains-any", [secaoBase, "GERAL", "DIRECAO"])
-        );
-        const snap = await getDocs(q);
-        const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setOportunidadesUnit(lista);
-      } catch (err) { console.error("Erro ao carregar oportunidades:", err); }
-    }
-    fetchOportunidadesUnidade();
-  }, [tabAtual, profile, secaoBase]);
-
   const objetivosEnriquecidos = useMemo(() => {
     return objetivosUsers.map(obj => {
       const catItem = catalogo.find(c => c.id === obj.docId) || {};
@@ -161,33 +139,6 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
     objetivosUsers.forEach(o => { if (o.docId === progObj && o.estado !== "RECUSADO") hasIt.add(o.uid); });
     setProgChecked(hasIt); setProgInitial(new Set(hasIt));
   }, [progObj, objetivosUsers]);
-
-  async function handleDistribuirParaUnidade(oportunidade, sufixoTag, destino = "MURAL") {
-    if (readOnly) return;
-    try {
-      const tagFinal = `${secaoBase}${sufixoTag}`;
-      
-      await addDoc(collection(db, "oportunidades_agrupamento"), {
-        titulo: oportunidade.titulo,
-        descricao: oportunidade.descricao,
-        link: oportunidade.link || "",
-        agrupamentoId: profile.agrupamentoId,
-        secaoDocId: profile.secaoDocId, 
-        alvos: [tagFinal],
-        autor: profile.nome,
-        destinatarios: destino, 
-        createdAt: serverTimestamp(),
-        arquivada: false
-      });
-
-      setShareModal(null);
-      const msg = destino === "GUIAS" ? "Enviado para a gestão dos Guias!" : "Publicado no Mural!";
-      alert(msg);
-    } catch (error) {
-      console.error(error);
-      alert("Erro ao publicar.");
-    }
-  }
 
   async function alterarEstado(objUid, objDocId, titulo, novoEstado) {
     if (readOnly) return;
@@ -404,12 +355,6 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
         </div>
       </div>
 
-      {/* 2. MURAL */}
-      <MuralOportunidades 
-        profile={profile} contextoRole="CHEFE_UNIDADE"  
-        onDistribute={readOnly ? null : (op) => setShareModal(op)} 
-      />
-
       {/* 3. ABAS E CONTEÚDO */}
       <div className="az-tabs">
         {!readOnly && <button className={`az-tab ${tabAtual === "PENDENTES" ? "az-tab--active" : ""}`} onClick={() => setTabAtual("PENDENTES")}>🚨 Pendentes</button>}
@@ -417,7 +362,6 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
         <button className={`az-tab ${tabAtual === "SECÇÃO" ? "az-tab--active" : ""}`} onClick={() => setTabAtual("SECÇÃO")}>👁 Visão Geral</button>
         <button className={`az-tab ${tabAtual === "RADAR" ? "az-tab--active" : ""}`} onClick={() => setTabAtual("RADAR")}>📊 Radar Pedagógico</button>
         <button className={`az-tab ${tabAtual === "PROGRESSO" ? "az-tab--active" : ""}`} onClick={() => setTabAtual("PROGRESSO")}>📈 Progresso</button>
-        <button className={`az-tab ${tabAtual === "OPORTUNIDADES" ? "az-tab--active" : ""}`} onClick={() => setTabAtual("OPORTUNIDADES")}>📢 Oportunidades Educativas</button>
       </div>
 
       {tabAtual === "PENDENTES" && !readOnly && (
@@ -611,140 +555,7 @@ export default function ChefeUnidadeObjetivos({ profile, readOnly }) {
           </div>
         </div>
       )}
-      {tabAtual === "OPORTUNIDADES" && (
-      <div className="az-grid" style={{ gap: 24 }}>
-        <div className="az-card">
-          <div className="az-card-inner az-row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 className="az-h3">📢 Oportunidades para a Unidade</h3>
-            <button className="az-btn" onClick={() => setShowArchiveModal(true)}>
-              🗄️ Ver Arquivo ({ocultosUnit.length})
-            </button>
-          </div>
-        </div>
 
-        <div className="az-grid-3"> 
-          {oportunidadesUnit.length === 0 ? (
-            <div className="az-panel" style={{ gridColumn: '1/-1', textAlign: 'center' }}>
-              <p className="az-muted">Nenhuma oportunidade recebida de momento.</p>
-            </div>
-          ) : (
-            oportunidadesUnit
-              .filter(op => !ocultosUnit.includes(op.id))
-              .map(op => (
-                <div key={op.id} className="az-card" style={{ borderTop: '4px solid var(--brand-teal)' }}>
-                  <div className="az-card-inner">
-                    <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10, color: 'var(--brand-orange)' }}>{op.titulo}</div>
-                    <div 
-                      className="az-small muted" 
-                      style={{ height: 80, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: '4', WebkitBoxOrient: 'vertical' }}
-                      dangerouslySetInnerHTML={{ __html: op.descricao }} 
-                    />
-                    
-                    <div style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--stroke)', paddingTop: 12 }}>
-                      <a href={op.link} target="_blank" rel="noreferrer" className="az-btn-text">Abrir Link 🔗</a>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button className="az-btn-sm" onClick={() => setOcultosUnit([...ocultosUnit, op.id])}>📥 Arquivar</button>
-                        {!readOnly && (
-                          <button className="az-btn-sm az-btn-teal" onClick={() => setShareModal(op)}>📤 Partilhar</button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))
-          )}
-        </div>
-      </div> 
-    )}
-
-
-    {/* 🗄️ MODAL DE ARQUIVO DO CHEFE DE UNIDADE */}
-      {showArchiveModal && (
-          <div style={{ 
-            position: 'fixed', 
-            top: 0, 
-            left: 0, 
-            right: 0, 
-            bottom: 0, 
-            backgroundColor: 'rgba(0, 0, 0, 0.8)', 
-            backdropFilter: 'blur(6px)',           
-            display: 'flex', 
-            justifyContent: 'center', 
-            alignItems: 'center', 
-            zIndex: 10000                          
-           }}>
-          <div className="az-card" style={{ maxWidth: 500, width: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
-            <div className="az-card-inner">
-              <h3 className="az-h3" style={{ borderBottom: '1px solid var(--stroke)', paddingBottom: 10, marginBottom: 15 }}>
-                🗄️ Arquivo da Secção
-              </h3>
-              
-              <div style={{ overflowY: 'auto', maxHeight: '400px' }}>
-                  {oportunidadesUnit.filter(op => ocultosUnit.includes(op.id)).map(op => (
-                    <div key={op.id} className="az-panel az-panel-sm" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <span className="az-small">{op.titulo}</span>
-                      <button 
-                        className="az-btn-text" 
-                        onClick={() => setOcultosUnit(prev => prev.filter(id => id !== op.id))}
-                      >
-                        🔄 Recuperar
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              <div style={{ overflowY: 'auto', maxHeight: '400px' }}>
-                {oportunidadesUnit.filter(op => ocultosUnit.includes(op.id)).length === 0 ? (
-                  <p className="az-muted" style={{ textAlign: 'center', padding: '20px' }}>O arquivo está vazio.</p>
-                ) : (
-                  oportunidadesUnit.filter(op => ocultosUnit.includes(op.id)).map(op => (
-                    <div key={op.id} className="az-panel az-panel-sm" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, alignItems: 'center' }}>
-                      <span className="az-small" style={{ fontWeight: 600 }}>{op.titulo}</span>
-                      <button 
-                        className="az-btn-text" 
-                        style={{ color: 'var(--brand-teal)', fontSize: 11 }}
-                        onClick={() => setOcultosUnit(prev => prev.filter(id => id !== op.id))}
-                      >
-                        🔄 Recuperar
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <button className="az-btn" style={{ marginTop: 20, width: '100%' }} onClick={() => setShowArchiveModal(false)}>
-                Fechar Arquivo
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    {shareModal && (
-        <div style={{ 
-          position: 'fixed', 
-          top: 0, 
-          left: 0, 
-          right: 0, 
-          bottom: 0, 
-          backgroundColor: 'rgba(0, 0, 0, 0.8)', 
-          backdropFilter: 'blur(6px)',           
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          zIndex: 10001                          
-        }}>
-        <div className="az-card" style={{ maxWidth: 400, width: '90%' }}>
-          <div className="az-card-inner">
-            <h4 className="az-h4">Partilhar com:</h4>
-            <div className="az-grid" style={{ gap: 10, marginTop: 15 }}>
-              <button className="az-btn az-btn-primary" onClick={() => handleDistribuirParaUnidade(shareModal, "")}>🌍 Toda a Secção</button>
-              <button className="az-btn az-btn-teal" onClick={() => handleDistribuirParaUnidade(shareModal, "_GUIAS")}>⚜️ Guias, Sub-Guias e Dirigentes</button>
-              <button className="az-btn" onClick={() => handleDistribuirParaUnidade(shareModal, "_DIRIGENTES")}>👔 Só Dirigentes da Unidade</button>
-            </div>
-            <button className="az-btn-text" style={{ marginTop: 15, width: '100%' }} onClick={() => setShareModal(null)}>Cancelar</button>
-          </div>
-        </div>
-      </div>
-    )}
       {tabAtual === "AVALIACAO" && (
         <div className="az-card">
           <div className="az-card-inner">

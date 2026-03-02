@@ -77,6 +77,10 @@ service cloud.firestore {
       match /meta/{docId} {
         allow read, write: if signedIn() && request.auth.uid == uid;
       }
+
+      match /arquivados/{docId} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
     }
 
     // ==========================================
