@@ -30,11 +30,11 @@ const hasFuncao = (p, f) => Array.isArray(p?.funcoes) && p.funcoes.includes(f);
 
 function getTerminologia(secaoDocId) {
   const s = String(secaoDocId || "").toLowerCase();
-  if (s.includes("alcateia")) return { plural: "Bandos", singular: "Bando", labelObjetivosGrupo: "Objetivos (Bando)" };
-  if (s.includes("expedicao")) return { plural: "Patrulhas", singular: "Patrulha", labelObjetivosGrupo: "Objetivos (Patrulha)" };
-  if (s.includes("comunidade")) return { plural: "Equipas", singular: "Equipa", labelObjetivosGrupo: "Objetivos (Equipa)" };
-  if (s.includes("cla")) return { plural: "Tribos", singular: "Tribo", labelObjetivosGrupo: "Objetivos (Tribo)" };
-  return { plural: "Subunidades", singular: "Subunidade", labelObjetivosGrupo: "Objetivos (Grupo)" };
+  if (s.includes("alcateia")) return { plural: "Bandos", singular: "Bando", labelObjetivosGrupo: "Bando" };
+  if (s.includes("expedicao")) return { plural: "Patrulhas", singular: "Patrulha", labelObjetivosGrupo: "Patrulha" };
+  if (s.includes("comunidade")) return { plural: "Equipas", singular: "Equipa", labelObjetivosGrupo: "Equipa" };
+  if (s.includes("cla")) return { plural: "Tribos", singular: "Tribo", labelObjetivosGrupo: "Tribo" };
+  return { plural: "Subunidades", singular: "Subunidade", labelObjetivosGrupo: "Grupo" };
 }
 
 const isValidNin = (nin) => /^\d{13}$/.test(String(nin || ""));

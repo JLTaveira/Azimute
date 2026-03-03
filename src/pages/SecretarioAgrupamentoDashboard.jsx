@@ -617,7 +617,11 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
                               <tr key={el.uid}>
                                 <td style={{ fontFamily: "monospace" }}>{el.nin || extractNIN(el.email)}</td>
                                 <td style={{ fontWeight: 600 }}>{el.nome}</td>
-                                <td>{el.isGuia ? "Guia" : el.isSubGuia ? "Sub-Guia" : "-"}</td>
+                                <td>
+                                  {el.isGuia ? "Guia" : 
+                                  el.isSubGuia ? (el.cargo ? `Sub-Guia | ${el.cargo}` : "Sub-Guia") : 
+                                  (el.cargo || "-")}
+                                </td>
                                 <td>{nomeEtapa(el.etapaProgresso)}</td>
                               </tr>
                             ))}

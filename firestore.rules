@@ -65,6 +65,7 @@ service cloud.firestore {
         (request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt', 'forcarMudancaPassword']))
         || (isChefeUnidade() && sameSecao(resource.data) && resource.data.ativo != false && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['patrulhaId', 'etapaProgresso', 'isGuia', 'isSubGuia', 'totem', 'updatedAt']))
         || (isChefeAgrupamento() && sameAgrupamento(resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['secaoDocId', 'tipo', 'funcoes', 'totem', 'updatedAt']))
+        || (isGuiaOuSubGuia() && sameSubunidade(resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['cargo', 'updatedAt']))
       );
 
       match /objetivos/{oid} {

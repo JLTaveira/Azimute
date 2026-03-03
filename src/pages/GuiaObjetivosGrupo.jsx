@@ -1,13 +1,17 @@
-/* Guia/Sub-Guia
-  src/pages/GuiaObjetivosGrupo.jsx
-  2026-02-20 - Joao Taveira (jltaveira@gmail.com) 
-  2026-02-27 - MuralOportunidades
- */
-
 import { useEffect, useState, useMemo } from "react";
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "../firebase";
-import MuralOportunidades from "../components/MuralOportunidades";
+
+// Configuração dos Cargos e Imagens
+const CARGOS_OPCOES = [
+  { id: "Animador", nome: "Animador", img: "animador.png" },
+  { id: "Cozinheiro", nome: "Cozinheiro", img: "cozinheiro.png" },
+  { id: "Guarda-Material", nome: "Guarda-Material", img: "guardamaterial.png" },
+  { id: "Relações Públicas", nome: "Relações Públicas", img: "relacoespublicas.png" },
+  { id: "Secretário", nome: "Secretário", img: "secretario.png" },
+  { id: "Socorrista", nome: "Socorrista", img: "socorrista.png" },
+  { id: "Tesoureiro", nome: "Tesoureiro", img: "tesoureiro.png" },
+];
 
 const AREA_META = {
   FISICO: { nome: "Físico", bg: "#16a34a", text: "#ffffff" },
@@ -18,10 +22,8 @@ const AREA_META = {
   SOCIAL: { nome: "Social", bg: "#eab308", text: "#000000" },
 };
 
-// Ordem das áreas para a grelha visual
 const AREA_ORDER = ["FISICO", "AFETIVO", "CARACTER", "ESPIRITUAL", "INTELECTUAL", "SOCIAL"];
 
-// Cores para os estados (Consistente com Chefe e Elemento)
 const ESTADO_CORES = {
   CONCLUIDO: { bg: "var(--brand-green)", color: "#fff", border: "none" },
   CONFIRMADO: { bg: "#0ea5e9", color: "#fff", border: "none" },
@@ -32,7 +34,6 @@ const ESTADO_CORES = {
   NONE: { bg: "rgba(255,255,255,0.05)", color: "var(--muted)", border: "1px dashed rgba(255,255,255,0.2)" }
 };
 
-// Funções Auxiliares (Aproveitando as que já tinhas)
 function areaToKey(a) {
   const k = String(a || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
   if (k === "CARATER") return "CARACTER";
@@ -48,7 +49,6 @@ function secaoFromSecaoDocId(secaoDocId) {
   return null;
 }
 
-// Termo dinâmico para a subunidade
 function getTermoGrupo(secaoDocId) {
   const s = String(secaoDocId || "").toLowerCase();
   if (s.includes("alcateia")) return "Bando";
@@ -111,10 +111,11 @@ export default function GuiaObjetivosGrupo({ profile }) {
         const snapUsers = await getDocs(qUsers);
         const listaElementos = snapUsers.docs
           .map(d => ({ uid: d.id, ...d.data() }))
-          .filter(u => u.uid !== profile.uid && u.ativo !== false);
+          // Filtramos apenas inativos. O próprio utilizador (Guia/Sub-Guia) deve aparecer para gerir cargos se necessário
+          .filter(u => u.ativo !== false);
+          
         setElementos(listaElementos.sort((a, b) => a.nome.localeCompare(b.nome)));
 
-        // BUSCA TODOS OS OBJETIVOS (Para poder desenhar a grelha de progresso)
         const todosObjetivos = [];
         await Promise.all(
           listaElementos.map(async elemento => {
@@ -145,7 +146,7 @@ export default function GuiaObjetivosGrupo({ profile }) {
     });
   }, [objetivos, catalogo]);
 
-  // Handlers (Inalterados conforme o teu código)
+  // Handlers de Objetivos
   async function handleValidar(uid, docId, titulo) {
     if (!window.confirm(`Validar proposta "${titulo}"?`)) return;
     try {
@@ -156,7 +157,6 @@ export default function GuiaObjetivosGrupo({ profile }) {
         updatedAt: serverTimestamp()
       });
       setObjetivos(prev => prev.map(o => (o.uid === uid && o.docId === docId) ? { ...o, estado: "VALIDADO" } : o));
-      alert("Validado!");
     } catch (e) { alert("Erro ao validar."); }
   }
 
@@ -180,14 +180,25 @@ export default function GuiaObjetivosGrupo({ profile }) {
         updatedAt: serverTimestamp()
       });
       setObjetivos(prev => prev.map(o => (o.uid === uid && o.docId === docId) ? { ...o, estado: "REALIZADO" } : o));
-      alert("Enviado ao Chefe!");
     } catch (e) { alert("Erro ao comunicar conclusão."); }
+  }
+
+  // handler para Atualizar Cargo
+  async function handleUpdateCargo(uid, novoCargo) {
+    try {
+      await updateDoc(doc(db, "users", uid), {
+        cargo: novoCargo,
+        updatedAt: serverTimestamp()
+      });
+      setElementos(prev => prev.map(el => el.uid === uid ? { ...el, cargo: novoCargo } : el));
+    } catch (e) {
+      alert("Erro ao atualizar cargo.");
+    }
   }
 
   if (loading) return <div className="az-loading-screen"><div className="az-logo-pulse">⏳</div></div>;
 
   const grouped = {};
-  // Para a tab de VALIDAR, mostramos apenas o que requer ação (ESCOLHA ou CONFIRMADO)
   objetivosEnriquecidos.filter(o => ["ESCOLHA", "CONFIRMADO"].includes(o.estado)).forEach(obj => {
     if (!grouped[obj.uid]) {
       const el = elementos.find(e => e.uid === obj.uid);
@@ -210,7 +221,7 @@ export default function GuiaObjetivosGrupo({ profile }) {
       {tabAtual === "VALIDAR" && (
         <div className="animate-fade-in">
           {Object.keys(grouped).length === 0 ? (
-            <div className="az-panel" style={{ textAlign: "center", padding: "60px 20px" }}><p className="az-muted" style={{ color: "var(--muted)" }}>Tudo em dia!</p></div>
+            <div className="az-panel" style={{ textAlign: "center", padding: "60px 20px" }}><p className="az-muted" style={{ color: "rgba(23,154,171,1)" }}>Tudo em dia!</p></div>
           ) : (
             Object.values(grouped).map(group => (
               <div key={group.nome} className="az-card" style={{ marginBottom: 16 }}>
@@ -248,17 +259,36 @@ export default function GuiaObjetivosGrupo({ profile }) {
       {tabAtual === "VISAO_GERAL" && (
         <div className="animate-fade-in az-grid" style={{ gap: 16 }}>
           <div className="az-panel" style={{ background: "rgba(255,255,255,0.05)", padding: "12px 20px" }}>
-             <h3 style={{ margin: 0, color: "var(--brand-teal)", fontSize: "16px" }}>⛺ {termoGrupo}: {profile?.patrulhaId}</h3>
+              <h3 style={{ margin: 0, color: "var(--brand-teal)", fontSize: "16px" }}>⛺ {termoGrupo}: {profile?.patrulhaId}</h3>
           </div>
           {elementos.map(el => {
             const seusObjetivos = objetivosEnriquecidos.filter(o => o.uid === el.uid);
             return (
               <div key={el.uid} className="az-card">
                 <div className="az-card-inner">
-                  <div style={{ fontWeight: 800, marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
-                    <span>👤 {el.nome}</span>
-                    <span className="az-small muted">{seusObjetivos.filter(o => o.estado === "CONCLUIDO").length} concluídos</span>
+                  <div style={{ fontWeight: 800, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span>👤 {el.nome}</span>
+                      {el.isGuia && <span className="az-badge" style={{ background: 'var(--brand-orange)', fontSize: '10px' }}>Guia</span>}
+                      {el.isSubGuia && <span className="az-badge" style={{ background: 'var(--brand-teal)', fontSize: '10px' }}>Sub-Guia</span>}
+                    </div>
+
+                    {/* Dropdown de Cargos - Apenas para Sub-Guia ou Elementos Normais */}
+                    {!el.isGuia && (
+                      <select 
+                        value={el.cargo || ""} 
+                        onChange={(e) => handleUpdateCargo(el.uid, e.target.value)}
+                        className="az-input"
+                        style={{ width: 'auto', padding: '4px 8px', fontSize: '12px', height: '30px' }}
+                      >
+                        <option value="">Sem cargo...</option>
+                        {CARGOS_OPCOES.map(c => (
+                          <option key={c.id} value={c.id}>{c.nome}</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
+
                   <div className="az-grid" style={{ gap: 8 }}>
                     {AREA_ORDER.map(a => {
                       const catItems = catalogo.filter(c => c._areaKey === a);
@@ -290,7 +320,6 @@ export default function GuiaObjetivosGrupo({ profile }) {
   );
 }
 
-// Helper de estilo para os botões das tabs
 function tabStyle(active) {
   return {
     padding: "6px 16px", borderRadius: "20px", cursor: "pointer", fontSize: "14px",

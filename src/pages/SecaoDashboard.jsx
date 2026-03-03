@@ -26,6 +26,40 @@ import servicoImg from "../assets/servico.png";
 import partidaImg from "../assets/partida.png";
 import cuImg from "../assets/cu.png";
 import instrutorImg from "../assets/instrutor.png";
+import animadorImg from "../assets/animador.png";
+import cozinheiroImg from "../assets/cozinheiro.png";
+import guardamaterialImg from "../assets/guardamaterial.png";
+import relacoespublicasImg from "../assets/relacoespublicas.png";
+import secretarioImg from "../assets/secretario.png";
+import socorristaImg from "../assets/socorrista.png";
+import tesoureiroImg from "../assets/tesoureiro.png";
+
+// Mapeamento de imagens de cargo
+const cargoImgMap = {
+  "Animador": animadorImg,
+  "Cozinheiro": cozinheiroImg,
+  "Guarda-Material": guardamaterialImg,
+  "Relações Públicas": relacoespublicasImg,
+  "Secretário": secretarioImg,
+  "Socorrista": socorristaImg,
+  "Tesoureiro": tesoureiroImg
+};
+
+const CARGO_CORES = {
+  "Animador": "#fb923c",
+  "Cozinheiro": "#fde047",
+  "Guarda-Material": "#ea580c",
+  "Relações Públicas": "#7dd3fc",
+  "Secretário": "#3b82f6",
+  "Socorrista": "#f87171",
+  "Tesoureiro": "#22c55e"
+};
+
+const ESTILO_DOURADO = { 
+  background: "rgba(251, 191, 36, 0.15)", 
+  color: "#fbbf24", 
+  border: "1px solid rgba(251, 191, 36, 0.3)" 
+};
 
 function isDirigente(u) { return u?.tipo === "DIRIGENTE"; }
 function isElemento(u) { return u?.tipo === "ELEMENTO"; }
@@ -232,8 +266,15 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
                 <span className="az-pill">{etapaSrc && <img src={etapaSrc} alt="Etapa" style={{ height: 18 }} />}Etapa: {nomeEtapa(etapaId)}</span>
               )}
 
-              {souGuia && <span className="az-pill" style={{ background: "rgba(236,131,50,.15)", color: "var(--brand-orange)" }}>⚜️ Guia de {labelGrupo}</span>}
-              {souSubGuia && <span className="az-pill" style={{ background: "rgba(236,131,50,.15)", color: "var(--brand-orange)" }}>⚜️ Sub-Guia de {labelGrupo}</span>}
+              {!souGuia && profile?.cargo && (
+                <span className="az-pill" style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(23,154,171,.1)" }}>
+                  {cargoImgMap[profile.cargo] && <img src={cargoImgMap[profile.cargo]} alt="" style={{ height: 18 }} />}
+                  {profile.cargo}
+                </span>              
+              )}
+
+              {souGuia && <span className="az-pill" style={ESTILO_DOURADO}>⚜️ Guia de {labelGrupo}</span>}
+              {souSubGuia && <span className="az-pill" style={ESTILO_DOURADO}>⚜️ Sub-Guia de {labelGrupo}</span>}
             </div>
           </div>
           {podeAbrirObjetivosGrupo && (
@@ -321,8 +362,15 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
                           <div key={e.uid} className="az-panel az-panel-sm" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
                             <div style={{ flex: 1, minWidth: 150 }}>
                               <b style={{ color: "var(--panel-text)" }}>{e.nome}</b>
+
+                              {!e.isGuia && e.cargo && (
+                                <span style={{ fontSize: 11, fontWeight: 900, color: CARGO_CORES[e.cargo], textTransform: 'uppercase', marginLeft: 8 }}>
+                                  {e.cargo}
+                                </span>
+                              )}
+
                               {(e.isGuia || e.isSubGuia) && (
-                                <span className="az-pill" style={{ marginLeft: 6, fontSize: 10, background: "rgba(236,131,50,.15)", color: "#ea580c", border: "1px solid rgba(236,131,50,.3)" }}>
+                                <span className="az-pill" style={{ marginLeft: 6, fontSize: 10, ...ESTILO_DOURADO }}>
                                   {e.isGuia ? "Guia" : "Sub-Guia"}
                                 </span>
                               )}
