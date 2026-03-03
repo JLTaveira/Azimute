@@ -76,6 +76,7 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
   const [oportunidadesCNE, setOportunidadesCNE] = useState([]);
   const [partilhasAgrupamento, setPartilhasAgrupamento] = useState([]);
   const [ocultosAgrupamento, setOcultosAgrupamento] = useState([]);
+  const [recursosCNE, setRecursosCNE] = useState([]);
   const [syncing, setSyncing] = useState(false);
   const [shareModal, setShareModal] = useState(null);
   const [shareTargets, setShareTargets] = useState([]);
@@ -362,6 +363,29 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
     } catch (error) { alert("Erro na importação."); } finally { setImporting(false); }
   }
 
+  async function handleSyncRecursos() {
+    if (readOnly) return;
+    setSyncing(true); // Ativa o estado de loading no botão
+    try {
+      const fn = httpsCallable(functions, 'syncRecursosCNE');
+      
+      // Se a lista local de recursosCNE estiver vazia, pede 6 páginas.
+      // Se já tivermos dados, pede apenas as últimas 2 (manutenção manual).
+      const numPaginas = recursosCNE.length === 0 ? 6 : 2;
+      
+      const res = await fn({ pages: numPaginas });
+      alert(res.data.message);
+      
+      // Recarrega os dados para mostrar os novos documentos no ecrã
+      fetchDadosSecretaria(); 
+    } catch (error) {
+      console.error("Erro na sincronização:", error);
+      alert("Erro ao ligar ao servidor de recursos oficiais do CNE.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   const notificacoesFiltradas = useMemo(() => {
     return filtro === "PENDENTES" ? notificacoes.filter(n => !n.resolvida) : notificacoes.filter(n => n.resolvida);
   }, [notificacoes, filtro]);
@@ -458,14 +482,26 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
           <div className="az-card-inner">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <div>
-                <h3 style={{ margin: 0, color: "var(--brand-teal)" }}>Triagem Pedagógica</h3>
-                <p className="az-small muted">Oportunidades Pedagógicas (SNA).</p>
+                <h3 style={{ margin: 0, color: "var(--brand-teal)" }}>Oportunidades Pedagógicas</h3>
+                <p className="az-small muted">(SNA)</p>
+              </div>
+              <div style={{ display: "flex", gap: 12 }}>
+                {!readOnly && (
+                  <button 
+                    className="az-btn az-btn-teal" 
+                    onClick={handleSyncRecursos} 
+                    disabled={syncing}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                  >
+                    {syncing ? "⏳ A sincronizar..." : "🔄 Sincronizar Recursos Oficiais"}
+                  </button>
+                )}
               </div>
               <div style={{ display: "flex", gap: 12 }}>
                 <button className="az-btn" style={{ borderColor: "var(--brand-orange)", color: "var(--brand-orange)" }} onClick={() => setShowArchiveModal(true)}>🗄️ Ver Arquivo ({ocultosAgrupamento.length})</button>
                 {!readOnly && (
                   <button className="az-btn az-btn-teal" onClick={handleSyncPadlet} disabled={syncing}>
-                    {syncing ? "⏳..." : "🔄 Sincronizar Agora"}
+                    {syncing ? "⏳..." : "🔄 Sincronizar Oportunidades Pedagógicas"}
                   </button>
                 )}
               </div>

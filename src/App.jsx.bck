@@ -23,7 +23,6 @@ import ElementoObjetivos from "./pages/ElementoObjetivos";
 import GuiaObjetivosGrupo from "./pages/GuiaObjetivosGrupo";
 import ChefeUnidadeObjetivos from "./pages/ChefeUnidadeObjetivos";
 import SecretarioAgrupamentoDashboard from "./pages/SecretarioAgrupamentoDashboard";
-import RecursosOficiais from "./pages/RecursosOficiais";
 
 const isDirigente = (p) => p?.tipo === "DIRIGENTE";
 const isElemento = (p) => p?.tipo === "ELEMENTO";
@@ -295,12 +294,6 @@ export default function App() {
                   <button className={`az-tab ${view === "cu_objetivos" ? "active" : ""}`} onClick={() => setView("cu_objetivos")}>
                     Objetivos Educativos
                   </button>
-                  <button 
-                    className={`az-tab ${view === "recursos" ? "active" : ""}`} 
-                    onClick={() => setView("recursos")}
-                  >
-                    📚 Recursos Oficiais CNE
-                  </button>
                 </>
               )}
 
@@ -332,7 +325,6 @@ export default function App() {
               )}
               
               {view === "dashboard" && <SecaoDashboard profile={profile} onOpenGuiaObjetivos={() => setView("guia_grupo")} />}
-              {view === "recursos" && <RecursosOficiais profile={profile} />}
             </main>
 
             {showPwdModal && (

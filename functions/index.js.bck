@@ -5,7 +5,6 @@
  */
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { onSchedule } = require("firebase-functions/v2/scheduler"); // Novo import para agendamentos
 const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 const axios = require("axios");
@@ -17,18 +16,17 @@ if (admin.apps.length === 0) {
   admin.initializeApp();
 }
 
-const db = admin.firestore();
-
 // Define a região europe-west1 para TODAS as funções de forma global
 setGlobalOptions({ region: "europe-west1" });
 
 // ============================================================================
-// 1. RESET DA PASSWORD (MANTIDO)
+// 1. RESET DA PASSWORD
 // ============================================================================
 exports.resetUserPassword = onCall(async (request) => {
   const { data, auth } = request;
   if (!auth) throw new HttpsError("unauthenticated", "Sessão expirada.");
 
+  const db = admin.firestore();
   const targetUid = data.uid;
 
   try {
@@ -60,12 +58,13 @@ exports.resetUserPassword = onCall(async (request) => {
 });
 
 // ============================================================================
-// 2. IMPORTAÇÃO DE UTILIZADORES (MANTIDO)
+// 2. IMPORTAÇÃO DE UTILIZADORES
 // ============================================================================
 exports.importUsersBatch = onCall(async (request) => {
   const { data, auth } = request;
   if (!auth) throw new HttpsError("unauthenticated", "Sem permissão.");
 
+  const db = admin.firestore();
   const callerSnap = await db.collection("users").doc(auth.uid).get();
   const callerProfile = callerSnap.data();
 
@@ -119,12 +118,13 @@ exports.importUsersBatch = onCall(async (request) => {
 });
 
 // ============================================================================
-// 3. ATIVAR / DESATIVAR UTILIZADOR (MANTIDO)
+// 3. ATIVAR / DESATIVAR UTILIZADOR
 // ============================================================================
 exports.toggleUserStatus = onCall(async (request) => {
   const { data, auth } = request;
   if (!auth) throw new HttpsError("unauthenticated", "Sessão expirada.");
 
+  const db = admin.firestore();
   const { uid, ativo } = data;
 
   try {
@@ -168,12 +168,16 @@ exports.toggleUserStatus = onCall(async (request) => {
 });
 
 // ============================================================================
-// 4. SINCRONIZAÇÃO PADLET CNE (MANTIDO)
+// 4. SINCRONIZAÇÃO DE OPORTUNIDADES EDUCATIVAS (PADLET CNE)
 // ============================================================================
+
 exports.syncOportunidadesCNE = onCall(async (request) => {
   const { auth } = request;
   if (!auth) throw new HttpsError("unauthenticated", "Sem permissão.");
 
+  const db = admin.firestore();
+  
+  // O URL real que encontraste no código-fonte do Padlet!
   const PADLET_RSS_URL = "https://padlet.com/padlets/msoqzzz192up2go7/exports/feed.xml";
 
   try {
@@ -192,8 +196,10 @@ exports.syncOportunidadesCNE = onCall(async (request) => {
     let importados = 0;
 
     for (const item of items) {
+      // 🚨 FIX: Limpamos o ID para evitar o erro de "documentPath" 🚨
+      // Pegamos no GUID ou no final do link e removemos caracteres ilegais
       let rawId = item.guid?._ || item.guid || String(item.link || Math.random());
-      const cleanId = rawId.replace(/[^a-zA-Z0-9]/g, "_");
+      const cleanId = rawId.replace(/[^a-zA-Z0-9]/g, "_"); // Substitui tudo o que não é letra/número por _
 
       const docRef = db.collection("oportunidades_cne").doc(cleanId);
       
@@ -218,132 +224,4 @@ exports.syncOportunidadesCNE = onCall(async (request) => {
     console.error("Erro na sincronização:", error);
     throw new HttpsError("internal", "Falha na ligação: " + error.message);
   }
-});
-
-// ============================================================================
-// 5. MÓDULO: RECURSOS OFICIAIS CNE (NOVO)
-// ============================================================================
-
-const MESES_MAP_LONGO = { 
-  'janeiro': '01', 'fevereiro': '02', 'março': '03', 'abril': '04', 'maio': '05', 'junho': '06', 
-  'julho': '07', 'agosto': '08', 'setembro': '09', 'outubro': '10', 'novembro': '11', 'dezembro': '12',
-  'jan': '01', 'fev': '02', 'mar': '03', 'abr': '04', 'mai': '05', 'jun': '06', 
-  'jul': '07', 'ago': '08', 'set': '09', 'out': '10', 'nov': '11', 'dez': '12'
-};
-
-/**
- * Função auxiliar que mimetiza o teu script Python para scraping
- */
-async function executarSincronizacaoRecursos(numPaginas) {
-  const AJAX_URL = "https://escutismo.pt/wp-admin/admin-ajax.php";
-  // Alterado para 2024 para garantir que os 89 documentos (incluindo Maio 2025) entram
-  const START_DATE_FILTER = "2024-01-01"; 
-  let verificados = 0;
-
-  for (let p = 1; p <= numPaginas; p++) {
-    try {
-      const params = new URLSearchParams({
-        'action': 'recursos_list',
-        'tipo_de_recurso': 'oficiais',
-        'paged': p.toString(),
-        'posts_per_page': '15'
-      });
-
-      const response = await axios.post(AJAX_URL, params, {
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-      });
-
-      if (!response.data || !response.data.success) break;
-
-      const $ = cheerio.load(response.data.data.html);
-      const itens = $('.recurso-item');
-      if (itens.length === 0) break;
-
-      const batch = db.batch();
-
-      itens.each((i, el) => {
-        const target = $(el).find('div[data-pdf]');
-        if (!target.length) return;
-
-        const url = target.attr('data-pdf');
-        const titulo = (target.attr('data-title') || "Sem Título").trim();
-        
-        // Extração de data robusta
-        let dataTexto = $(el).find('.recurso-item-data').text().trim() || 
-                        $(el).find('.recurso-item-info span').first().text().trim();
-        
-        const dateMatch = dataTexto.match(/(\d{1,2})\s+(?:de\s+)?([a-zA-Zç]+)\s+(?:de\s+)?(\d{4})/i);
-        
-        let dataFormatada = "2024-01-01";
-        if (dateMatch) {
-          const dia = dateMatch[1].padStart(2, '0');
-          const mesNome = dateMatch[2].toLowerCase();
-          const ano = dateMatch[3];
-          dataFormatada = `${ano}-${MESES_MAP_LONGO[mesNome] || '01'}-${dia}`;
-        }
-
-        // Filtro alargado para o teste de recuperação total
-        if (dataFormatada < START_DATE_FILTER) return;
-
-        // ID ÚNICO SEM CORTES: Resolve a sobreposição/atropelamento anterior
-        const docId = Buffer.from(url).toString('base64').replace(/[/+=]/g, '_');
-        const docRef = db.collection('recursos_oficiais_cne').doc(docId);
-
-        batch.set(docRef, {
-          titulo,
-          link: url,
-          dataPublicacaoTexto: dataTexto || "Data n/d",
-          dataPublicacao: dataFormatada,
-          tipo: 'OFICIAL',
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
-        }, { merge: true }); // O merge:true garante que ele atualiza se já existir ou cria se for novo
-        
-        verificados++;
-      });
-
-      await batch.commit();
-    } catch (error) {
-      console.error(`Erro pág ${p}:`, error.message);
-    }
-  }
-  return verificados;
-}
-
-/**
- * 5.1 Sincronização Manual (Disparada pelo Secretário)
- */
-exports.syncRecursosCNE = onCall(async (request) => {
-  const { auth, data } = request;
-  if (!auth) throw new HttpsError("unauthenticated", "Sem permissão.");
-
-  const paginas = data.pages || 2;
-  const count = await executarSincronizacaoRecursos(paginas);
-  return { success: true, message: `Sincronização concluída. ${count} documentos processados.` };
-});
-
-/**
- * 5.2 Sincronização Agendada (Sex, Sáb e Dom às 07:00)
- */
-exports.scheduledRecursosSync = onSchedule("0 7 * * 5,6,0", async (event) => {
-  await executarSincronizacaoRecursos(2);
-  console.log("Sincronização automática de fim-de-semana concluída.");
-});
-
-/**
- * 5.3 Limpeza Anual Automática (30 de Novembro)
- * Apaga documentos anteriores a 1 de Setembro do ano em curso
- */
-exports.limpezaAnualRecursos = onSchedule("0 0 30 11 *", async (event) => {
-  const anoAtual = new Date().getFullYear();
-  const limite = `${anoAtual}-09-01`;
-
-  const snapshot = await db.collection('recursos_oficiais_cne')
-    .where('dataPublicacao', '<', limite)
-    .get();
-
-  const batch = db.batch();
-  snapshot.docs.forEach(doc => batch.delete(doc.ref));
-  await batch.commit();
-  
-  console.log(`Limpeza anual: ${snapshot.size} recursos antigos removidos.`);
 });
