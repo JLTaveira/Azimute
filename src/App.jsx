@@ -91,7 +91,7 @@ export default function App() {
           const [aSnap, sSnap] = await Promise.all(metaPromises);
           if (aSnap?.exists()) setAgrupamentoNome(aSnap.data().nome || "");
           if (sSnap?.exists()) setSecaoNome(sSnap.data().nome || "");
-          if (p.tipo === "ELEMENTO") setView("objetivos"); else setView("dashboard");
+          setView("dashboard");
         } else { 
           await signOut(auth);
           setErr("Perfil não encontrado."); 
@@ -263,22 +263,50 @@ export default function App() {
             </div>
 
             <nav className="az-tabs">
-              {flags.isElemento && <button className={`az-tab ${view === "objetivos" ? "active" : ""}`} onClick={() => setView("objetivos")}>Meus Objetivos</button>}
-              {flags.isGuia && <button className={`az-tab ${view === "guia_grupo" ? "active" : ""}`} onClick={() => setView("guia_grupo")}>{termo.labelObjetivosGrupo}</button>}
+              {/* ✅ DASHBOARD PARA TODOS: É aqui que vive o Mural agora */}
+              <button 
+                className={`az-tab ${view === "dashboard" ? "active" : ""}`} 
+                onClick={() => setView("dashboard")}
+              >
+                Dashboard
+              </button>
+
+              {/* Abas exclusivas de Elementos */}
+              {flags.isElemento && (
+                <button className={`az-tab ${view === "objetivos" ? "active" : ""}`} onClick={() => setView("objetivos")}>
+                  Meus Objetivos
+                </button>
+              )}
+
+              {/* Aba exclusiva de Guias/Sub-Guias */}
+              {flags.isGuia && (
+                <button className={`az-tab ${view === "guia_grupo" ? "active" : ""}`} onClick={() => setView("guia_grupo")}>
+                  {termo.labelObjetivosGrupo}
+                </button>
+              )}
+
+              {/* Abas exclusivas de Dirigentes */}
               {flags.isDirigente && (
                 <>
-                  <button className={`az-tab ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}>Dashboard</button>
-                  <button className={`az-tab ${view === "subunidades" ? "active" : ""}`} onClick={() => setView("subunidades")}>{termo.plural}</button>
-                  <button className={`az-tab ${view === "cu_objetivos" ? "active" : ""}`} onClick={() => setView("cu_objetivos")}>Objetivos Educativos</button>
+                  <button className={`az-tab ${view === "subunidades" ? "active" : ""}`} onClick={() => setView("subunidades")}>
+                    {termo.plural}
+                  </button>
+                  <button className={`az-tab ${view === "cu_objetivos" ? "active" : ""}`} onClick={() => setView("cu_objetivos")}>
+                    Objetivos Educativos
+                  </button>
                 </>
               )}
-              {/* VISIBILIDADE PARA SECRETÁRIO OU TESOUREIRO */}
+
+              {/* Secretaria e Direção (Cargos Específicos) */}
               {(flags.isSA || flags.isTA) && (
-                <button className={`az-tab ${view === "secretario_agrupamento" ? "active" : ""}`} onClick={() => setView("secretario_agrupamento")}>Secretaria</button>
+                <button className={`az-tab ${view === "secretario_agrupamento" ? "active" : ""}`} onClick={() => setView("secretario_agrupamento")}>
+                  Secretaria
+                </button>
               )}
-              {/* VISIBILIDADE PARA CHEFE AGRUPAMENTO OU ADJUNTO */}
               {(flags.isCA || flags.isCAA) && (
-                <button className={`az-tab ${view === "chefe_agrupamento" ? "active" : ""}`} onClick={() => setView("chefe_agrupamento")}>Adultos</button>
+                <button className={`az-tab ${view === "chefe_agrupamento" ? "active" : ""}`} onClick={() => setView("chefe_agrupamento")}>
+                  Adultos
+                </button>
               )}
             </nav>
 

@@ -387,7 +387,7 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
         <button className={`az-tab ${filtro === "PENDENTES" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PENDENTES")}>📥 Ações Pendentes ({contagemPendentes})</button>
         <button className={`az-tab ${filtro === "RESOLVIDAS" ? "az-tab--active" : ""}`} onClick={() => setFiltro("RESOLVIDAS")}>🗄️ Arquivo / Emitidas</button>
         <button className={`az-tab ${filtro === "EFETIVO" ? "az-tab--active" : ""}`} onClick={() => setFiltro("EFETIVO")}>👥 Efetivo Agrupamento</button>
-        <button className={`az-tab ${filtro === "PADLET" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PADLET")}>🌐 Op. Educativas (CNE)</button>
+        <button className={`az-tab ${filtro === "PADLET" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PADLET")}>🌐 Canal de Mensagens</button>
       </div>
 
       {/* ABA: PENDENTES E RESOLVIDAS */}

@@ -24,97 +24,109 @@ export default function MuralOportunidades({ profile, onDistribute, contextoRole
 
   const sId = profile?.secaoDocId || ""; // Exato valor da BD: "1104cla"
 
-  const opcoesDestino = useMemo(() => {
-    const options = [];
-    if (!profile) return options;
+    const opcoesDestino = useMemo(() => {
+      const options = [];
+      if (!profile) return options;
 
-    // Prefixo de 4 dígitos (ex: 1104)
       const numAgrup = (profile.agrupamentoId?.split("_")[0] || "0000").padStart(4, '0');
-      const sId = profile.secaoDocId || ""; // Ex: 1104cla
-      const sBase = sId.replace(/[0-9]/g, ""); // Ex: cla
+      const sId = profile.secaoDocId || "";
+      const secLower = sId.toLowerCase();
 
-      // --- CONTEXTO: CHEFE DE AGRUPAMENTO (CA) ---
-      if (contextoRole === "CHEFE_AGRUPAMENTO") {
-        options.push({ label: "👥 Adultos", value: `${numAgrup}_dirigente` });
-        options.push({ label: "👔 Direção", value: `${numAgrup}_direcao` });
-        options.push({ label: "📩 Secretário", value: `${numAgrup}_secretaria` });
-        options.push({ label: "🐺 Alcateia (CU)", value: `${numAgrup}_alcateia` });
-        options.push({ label: "🧴 Expedição (CU)", value: `${numAgrup}_expedicao` });
-        options.push({ label: "🧭 Comunidade (CU)", value: `${numAgrup}_pioneiros` });
-        options.push({ label: "🎒 Clã (CU)", value: `${numAgrup}_cla` });
+      // Deteta a secção atual (cla, alcateia, etc.)
+      let sBase = "";
+      if (secLower.includes("alcateia")) sBase = "alcateia";
+      else if (secLower.includes("expedicao")) sBase = "expedicao";
+      else if (secLower.includes("comunidade")) sBase = "comunidade";
+      else if (secLower.includes("cla")) sBase = "cla";
+
+      // --- 1. SECRETÁRIO DE AGRUPAMENTO (SA) ---
+      if (contextoRole === "SECRETARIO_AGRUPAMENTO") {
+        options.push({ label: "⚜️ Chefe de Agrupamento", value: `${numAgrup}ca` });
+        options.push({ label: "👔 Direção", value: `${numAgrup}direcao` });
+        options.push({ label: "📢 Todo o Agrupamento", value: `${numAgrup}geral` });
+        options.push({ label: "👥 Todos os Dirigentes", value: `${numAgrup}dirigentes` });
+        options.push({ label: "⚜️ Todos os Guias (Agrup.)", value: `${numAgrup}guias` });
+        // Envio exclusivo para Chefes de Unidade
+        options.push({ label: "🐺 Chefe de Alcateia (CU)", value: `${numAgrup}calcateia` });
+        options.push({ label: "🧴 Chefe de Expedição (CU)", value: `${numAgrup}cexpedicao` });
+        options.push({ label: "🧭 Chefe de Comunidade (CU)", value: `${numAgrup}ccomunidade` });
+        options.push({ label: "🎒 Chefe de Clã (CU)", value: `${numAgrup}ccla` });
       }
 
-      // --- CONTEXTO: SECRETÁRIO DE AGRUPAMENTO (SA) ---
-      else if (contextoRole === "SECRETARIO_AGRUPAMENTO") {
-        options.push({ label: "📢 Agrupamento", value: `${numAgrup}_agrupamento` });
-        options.push({ label: "👥 Adultos", value: `${numAgrup}_dirigente` });
-        options.push({ label: "⚜️ Guias (+ Equipas Animação)", value: `${numAgrup}_guias` });
-        options.push({ label: "👔 Direção", value: `${numAgrup}_direcao` });
-        // Envio exclusivo para os Chefes de Unidade
-        options.push({ label: "🐺 Alcateia (CU)", value: `${numAgrup}_alcateia` });
-        options.push({ label: "🧴 Expedição (CU)", value: `${numAgrup}_expedicao` });
-        options.push({ label: "🧭 Comunidade (CU)", value: `${numAgrup}_pioneiros` });
-        options.push({ label: "🎒 Clã (CU)", value: `${numAgrup}_cla` });
+      // --- 2. CHEFE DE AGRUPAMENTO (CA) ---
+      else if (contextoRole === "CHEFE_AGRUPAMENTO") {
+        options.push({ label: "📩 Secretário de Agrupamento", value: `${numAgrup}sa` });
+        options.push({ label: "👔 Direção", value: `${numAgrup}direcao` });
+        options.push({ label: "👥 Todos os Dirigentes", value: `${numAgrup}dirigentes` });
+        // Envio exclusivo para Chefes de Unidade
+        options.push({ label: "🐺 Chefe de Alcateia (CU)", value: `${numAgrup}calcateia` });
+        options.push({ label: "🧴 Chefe de Expedição (CU)", value: `${numAgrup}cexpedicao` });
+        options.push({ label: "🧭 Chefe de Comunidade (CU)", value: `${numAgrup}ccomunidade` });
+        options.push({ label: "🎒 Chefe de Clã (CU)", value: `${numAgrup}ccla` });
       }
 
-      // --- CONTEXTO: CHEFE DE UNIDADE (CU) ---
-      else if (contextoRole === "CHEFE_UNIDADE" && sId) {
-        options.push({ label: "🖼️ Secção", value: sId });
-        options.push({ label: "🎯 Guias e Sub-Guias", value: `${sId}_GUIAS` });
-        options.push({ label: "👥 Equipa de Animação", value: `${sId}_DIRIGENTES` });
+      // --- 3. CHEFE DE UNIDADE (CU) ---
+      else if (contextoRole === "CHEFE_UNIDADE" && sBase) {
+        const prefixoSecao = `${numAgrup}${sBase}`;
+        options.push({ label: "👔 Direção", value: `${numAgrup}direcao` });
+        options.push({ label: "👥 Equipa de Animação (EA)", value: `${prefixoSecao}ea` });
+        options.push({ label: "⚜️ Meus Guias (+ EA)", value: `${prefixoSecao}guias` }); // Enviará para guias e ouviremos com EA também
+        options.push({ label: "🌍 Todos (Elementos + EA)", value: `${prefixoSecao}todos` });
       }
 
       return options;
     }, [profile, contextoRole]);
 
-  const minhasTags = useMemo(() => {
-    const tags = [];
-    if (!profile) return tags;
-    // extrai número agrupamento no formato 0000 e aplica a tag da seccao
-    const numAgrup = (profile.agrupamentoId?.split("_")[0] || "0000").padStart(4, '0');
-    const sId = profile.secaoDocId || "";
-    const sBase = sId.replace(/[0-9]/g, "");
-    const f = profile.funcoes || [];
+    const minhasTags = useMemo(() => {
+      const tags = [];
+      if (!profile) return tags;
 
-    // --- FILTRO POR CONTEXTO DE PÁGINA ---
-      // Esta lógica garante que, se o utilizador acumular cargos, as mensagens não se misturam.
+      const numAgrup = (profile.agrupamentoId?.split("_")[0] || "0000").padStart(4, '0');
+      const sId = profile.secaoDocId || "";
+      const secLower = sId.toLowerCase();
 
-      // 1. CONTEXTO: SECRETÁRIO DE AGRUPAMENTO
+      let sBase = "";
+      if (secLower.includes("alcateia")) sBase = "alcateia";
+      else if (secLower.includes("expedicao")) sBase = "expedicao";
+      else if (secLower.includes("comunidade")) sBase = "comunidade";
+      else if (secLower.includes("cla")) sBase = "cla";
+
+      const prefixoSecao = `${numAgrup}${sBase}`;
+
+      // --- A. CONTEXTO: SECRETÁRIO DE AGRUPAMENTO ---
       if (contextoRole === "SECRETARIO_AGRUPAMENTO") {
-        // Na página do SA, ele vê APENAS o que é do cargo e do Agrupamento (Adultos/Estratégico)
-        tags.push(`${numAgrup}_secretaria`, `${numAgrup}_direcao`, `${numAgrup}_dirigente`, `${numAgrup}_agrupamento`, `${numAgrup}_guias`);
+        tags.push(`${numAgrup}sa`, `${numAgrup}direcao`, `${numAgrup}geral`, `${numAgrup}dirigentes`);
       } 
       
-      // 2. CONTEXTO: CHEFE DE AGRUPAMENTO
+      // --- B. CONTEXTO: CHEFE DE AGRUPAMENTO ---
       else if (contextoRole === "CHEFE_AGRUPAMENTO") {
-        // Na página do CA, ele vê APENAS a Direção e o canal geral de Dirigentes
-        tags.push(`${numAgrup}_direcao`, `${numAgrup}_dirigente`);
-        if (f.includes("CHEFE_AGRUPAMENTO_ADJUNTO")) tags.push(`${numAgrup}_adjunto`);
+        tags.push(`${numAgrup}ca`, `${numAgrup}direcao`, `${numAgrup}geral`, `${numAgrup}dirigentes`);
       } 
       
-      // 3. CONTEXTO: CHEFE DE UNIDADE OU DIRIGENTE DE EQUIPA (No Dashboard de Secção)
-      else if (contextoRole === "CHEFE_UNIDADE" || contextoRole === "DIRIGENTE") {
-        // Aqui mostramos apenas o que diz respeito à Unidade específica e avisos gerais a adultos
-        if (sId) {
-          tags.push(sId, `${sId}_DIRIGENTES`, `${sId}_GUIAS`); // Mensagens internas da unidade
-          
-          // REGRA: Apenas se o cargo no contexto for CU é que ouve a tag de secção do SA/CA (ex: 1104_alcateia)
-          if (contextoRole === "CHEFE_UNIDADE" && sBase) {
-            tags.push(`${numAgrup}_${sBase}`); 
-          }
-          
-          tags.push(`${numAgrup}_guias`); // Equipa de Animação monitoriza o canal de guias
+      // --- C. CONTEXTO: CHEFE DE UNIDADE (CU) ---
+      else if (contextoRole === "CHEFE_UNIDADE") {
+        tags.push(`${numAgrup}geral`, `${numAgrup}dirigentes`);
+        if (sBase) {
+          tags.push(`${numAgrup}c${sBase}`); // Canal exclusivo SA/CA -> CU (ex: 1104ccla)
+          tags.push(`${prefixoSecao}ea`, `${prefixoSecao}guias`, `${prefixoSecao}todos`);
         }
-        tags.push(`${numAgrup}_dirigente`); // Adultos veem sempre avisos gerais de dirigentes
-      } 
-      
-      // 4. CONTEXTO: ELEMENTO (JOVENS)
+      }
+
+      // --- D. CONTEXTO: DIRIGENTE (EA) ---
+      else if (contextoRole === "DIRIGENTE") {
+        tags.push(`${numAgrup}geral`, `${numAgrup}dirigentes`);
+        if (sBase) {
+          tags.push(`${prefixoSecao}ea`, `${prefixoSecao}guias`, `${prefixoSecao}todos`);
+        }
+      }
+
+      // --- E. CONTEXTO: ELEMENTO / GUIA ---
       else if (contextoRole === "ELEMENTO") {
-        tags.push(`${numAgrup}_agrupamento`);
-        if (sId) {
-          tags.push(sId);
+        tags.push(`${numAgrup}geral`);
+        if (sBase) {
+          tags.push(`${prefixoSecao}todos`);
           if (profile.isGuia || profile.isSubGuia) {
-            tags.push(`${sId}_GUIAS`, `${numAgrup}_guias`);
+            tags.push(`${prefixoSecao}guias`, `${numAgrup}guias`);
           }
         }
       }
@@ -122,14 +134,19 @@ export default function MuralOportunidades({ profile, onDistribute, contextoRole
       return tags;
     }, [profile, contextoRole]);
 
+
   useEffect(() => {
     if (profile?.agrupamentoId && minhasTags.length > 0) fetchMural();
   }, [profile, minhasTags]);
 
+ 
   async function fetchMural() {
+    if (!profile?.agrupamentoId) return;
     setLoading(true);
     try {
-
+      const numAgrup = (profile.agrupamentoId.split("_")[0]).padStart(4, '0');
+      
+      // Busca por prefixo: abrange "1104", "1104_Paranhos", "1104_Teste", etc.
       const q = query(
         collection(db, "oportunidades_agrupamento"),
         where("agrupamentoId", "==", profile.agrupamentoId)
@@ -137,40 +154,30 @@ export default function MuralOportunidades({ profile, onDistribute, contextoRole
       
       const snap = await getDocs(q);
       const agora = new Date();
-      let lista = [];
+      const mapUnico = new Map();
 
-      for (const d of snap.docs) {
+      snap.docs.forEach(d => {
         const data = d.data();
-        const agora = new Date();
-
-        
-        // 1. Filtro de Segurança por Tags
         const alvos = data.alvos || [];
+        
         const temPermissao = alvos.some(alvo => minhasTags.includes(alvo));
-        if (!temPermissao) continue;
+        if (!temPermissao) return;
 
-        // 2. Filtro de Datas
         const inicio = data.dataInicio ? new Date(data.dataInicio) : null;
         const fim = data.dataFim ? new Date(data.dataFim) : null;
-        
-        // Garante que o fim dura até às 23h59 do último dia selecionado
         if (fim) fim.setHours(23, 59, 59, 999);
+        if (inicio && agora < inicio) return;
+        if (fim && agora > fim) return;
 
-        if (inicio && agora < inicio) continue;
-        if (fim && agora > fim) continue;
+        mapUnico.set(d.id, { id: d.id, ...data });
+      });
 
-        // 3. Filtro de Arquivados Pessoais
-        const archSnap = await getDoc(doc(db, "users", auth.currentUser.uid, "arquivados", d.id));
-        if (archSnap.exists()) continue;
+      const listaFinal = Array.from(mapUnico.values())
+        .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
 
-        lista.push({ id: d.id, ...data });
-      }
-      
-      // Ordena pelas mensagens mais recentes
-      lista.sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
-      setOportunidades(lista);
+      setOportunidades(listaFinal);
     } catch (err) {
-      console.error("Erro ao carregar mural:", err);
+      console.error("Erro:", err);
     } finally {
       setLoading(false);
     }
@@ -186,6 +193,10 @@ export default function MuralOportunidades({ profile, onDistribute, contextoRole
   }
 
   async function handlePublicarMensagem() {
+    const numAgrup = (profile.agrupamentoId.split("_")[0]).padStart(4, '0');
+    const nomeAgrup = profile.agrupamentoId.split("_")[1] || "";
+    const fullAgrupId = nomeAgrup ? `${numAgrup}_${nomeAgrup}` : numAgrup;
+
     if (!formData.destino) return alert("Selecione um destino.");
     if (!formData.dataInicio || !formData.dataFim) return alert("As datas de início e fim são obrigatórias.");
 
@@ -194,7 +205,7 @@ export default function MuralOportunidades({ profile, onDistribute, contextoRole
         titulo: formData.titulo,
         descricao: formData.descricao,
         link: formData.link || "",
-        agrupamentoId: profile.agrupamentoId,
+        agrupamentoId: fullAgrupId,
         secaoDocId: sId,
         alvos: [formData.destino], 
         autor: profile.nome,

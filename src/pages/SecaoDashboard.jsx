@@ -66,7 +66,7 @@ export default function SecaoDashboard({ profile, onOpenGuiaObjetivos }) {
   const souChefeUnidade = souDirigente && hasFuncao(profile, "CHEFE_UNIDADE");
   const souGuia = isElemento(profile) && isGuia(profile);
   const souSubGuia = isElemento(profile) && isSubGuia(profile);
-  const cargoMural = souChefeUnidade ? "CHEFE_UNIDADE" : "DIRIGENTE";
+  const cargoMural = souChefeUnidade ? "CHEFE_UNIDADE" : (souDirigente ? "DIRIGENTE" : "ELEMENTO");
   const podeAbrirObjetivosGrupo = souChefeUnidade || souGuia || souSubGuia;
 
   const sec = (secaoDocId || "").toLowerCase();
