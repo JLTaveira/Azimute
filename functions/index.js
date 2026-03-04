@@ -221,22 +221,45 @@ exports.syncOportunidadesCNE = onCall(async (request) => {
 });
 
 // ============================================================================
-// 5. MÓDULO: RECURSOS OFICIAIS CNE (NOVO)
+// 5. MÓDULO: RECURSOS OFICIAIS CNE (AUTOMAÇÃO TOTAL)
 // ============================================================================
 
-const MESES_MAP_LONGO = { 
-  'janeiro': '01', 'fevereiro': '02', 'março': '03', 'abril': '04', 'maio': '05', 'junho': '06', 
-  'julho': '07', 'agosto': '08', 'setembro': '09', 'outubro': '10', 'novembro': '11', 'dezembro': '12',
-  'jan': '01', 'fev': '02', 'mar': '03', 'abr': '04', 'mai': '05', 'jun': '06', 
-  'jul': '07', 'ago': '08', 'set': '09', 'out': '10', 'nov': '11', 'dez': '12'
-};
+/**
+ * 5.1 Sincronização Diária (07:00 AM)
+ * Verifica novidades todas as manhãs automaticamente
+ */
+exports.scheduledRecursosSync = onSchedule("0 7 * * *", async (event) => {
+  await executarSincronizacaoRecursos(5); 
+  console.log("Sincronização diária concluída.");
+});
 
 /**
- * Função auxiliar que mimetiza o teu script Python para scraping
+ * 5.2 Limpeza Dinâmica Rolante (Meia-noite)
+ * Mantém apenas o histórico dos últimos 367 dias
+ */
+exports.limpezaDinamicaRecursos = onSchedule("0 0 * * *", async (event) => {
+  const hoje = new Date();
+  const dataCorte = new Date(hoje);
+  dataCorte.setDate(hoje.getDate() - 367);
+  const limiteISO = dataCorte.toISOString().split('T')[0];
+
+  const snapshot = await db.collection('recursos_oficiais_cne')
+    .where('dataPublicacao', '<', limiteISO)
+    .get();
+
+  const batch = db.batch();
+  snapshot.docs.forEach(doc => batch.delete(doc.ref));
+  await batch.commit();
+  console.log(`Limpeza diária: ${snapshot.size} registos antigos removidos.`);
+});
+
+/**
+ * Função de Processamento Principal
+ * Agora usa o seletor .df-book-title descoberto no teu script Python
  */
 async function executarSincronizacaoRecursos(numPaginas) {
   const AJAX_URL = "https://escutismo.pt/wp-admin/admin-ajax.php";
-  // Alterado para 2024 para garantir que os 89 documentos (incluindo Maio 2025) entram
+  // Definido para 2024 para recuperares os 89 documentos originais
   const START_DATE_FILTER = "2024-01-01"; 
   let verificados = 0;
 
@@ -253,52 +276,47 @@ async function executarSincronizacaoRecursos(numPaginas) {
         headers: { 'X-Requested-With': 'XMLHttpRequest' }
       });
 
-      if (!response.data || !response.data.success) break;
+      if (!response.data?.success) break;
 
       const $ = cheerio.load(response.data.data.html);
-      const itens = $('.recurso-item');
-      if (itens.length === 0) break;
-
       const batch = db.batch();
 
-      itens.each((i, el) => {
+      $('.recurso-item').each((i, el) => {
         const target = $(el).find('div[data-pdf]');
-        if (!target.length) return;
+        
+        // --- A TUA DESCOBERTA: Extração via .df-book-title ---
+        const textoMeta = $(el).find('.df-book-title').text().trim();
+        
+        if (target.length) {
+          const url = target.attr('data-pdf');
+          const titulo = (target.attr('data-title') || "Sem Título").trim();
+          
+          // Captura o padrão DD-MM-YYYY (Ex: 30-05-2025)
+          const match = textoMeta.match(/(\d{2})-(\d{2})-(\d{4})/);
+          let dataFormatada = "2024-01-01";
+          
+          if (match) {
+            // Converte para YYYY-MM-DD para que o Firebase ordene corretamente
+            dataFormatada = `${match[3]}-${match[2]}-${match[1]}`;
+          }
 
-        const url = target.attr('data-pdf');
-        const titulo = (target.attr('data-title') || "Sem Título").trim();
-        
-        // Extração de data robusta
-        let dataTexto = $(el).find('.recurso-item-data').text().trim() || 
-                        $(el).find('.recurso-item-info span').first().text().trim();
-        
-        const dateMatch = dataTexto.match(/(\d{1,2})\s+(?:de\s+)?([a-zA-Zç]+)\s+(?:de\s+)?(\d{4})/i);
-        
-        let dataFormatada = "2024-01-01";
-        if (dateMatch) {
-          const dia = dateMatch[1].padStart(2, '0');
-          const mesNome = dateMatch[2].toLowerCase();
-          const ano = dateMatch[3];
-          dataFormatada = `${ano}-${MESES_MAP_LONGO[mesNome] || '01'}-${dia}`;
+          if (dataFormatada < START_DATE_FILTER) return;
+
+          // ID ÚNICO: Link completo em Base64 para evitar atropelamentos
+          const docId = Buffer.from(url).toString('base64').replace(/[/+=]/g, '_').substring(0, 150);
+          const docRef = db.collection('recursos_oficiais_cne').doc(docId);
+
+          batch.set(docRef, {
+            titulo,
+            link: url,
+            dataPublicacaoTexto: match ? match[0] : "Data n/d",
+            dataPublicacao: dataFormatada,
+            tipo: 'OFICIAL',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          
+          verificados++;
         }
-
-        // Filtro alargado para o teste de recuperação total
-        if (dataFormatada < START_DATE_FILTER) return;
-
-        // ID ÚNICO SEM CORTES: Resolve a sobreposição/atropelamento anterior
-        const docId = Buffer.from(url).toString('base64').replace(/[/+=]/g, '_');
-        const docRef = db.collection('recursos_oficiais_cne').doc(docId);
-
-        batch.set(docRef, {
-          titulo,
-          link: url,
-          dataPublicacaoTexto: dataTexto || "Data n/d",
-          dataPublicacao: dataFormatada,
-          tipo: 'OFICIAL',
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
-        }, { merge: true }); // O merge:true garante que ele atualiza se já existir ou cria se for novo
-        
-        verificados++;
       });
 
       await batch.commit();
@@ -308,42 +326,3 @@ async function executarSincronizacaoRecursos(numPaginas) {
   }
   return verificados;
 }
-
-/**
- * 5.1 Sincronização Manual (Disparada pelo Secretário)
- */
-exports.syncRecursosCNE = onCall(async (request) => {
-  const { auth, data } = request;
-  if (!auth) throw new HttpsError("unauthenticated", "Sem permissão.");
-
-  const paginas = data.pages || 2;
-  const count = await executarSincronizacaoRecursos(paginas);
-  return { success: true, message: `Sincronização concluída. ${count} documentos processados.` };
-});
-
-/**
- * 5.2 Sincronização Agendada (Sex, Sáb e Dom às 07:00)
- */
-exports.scheduledRecursosSync = onSchedule("0 7 * * 5,6,0", async (event) => {
-  await executarSincronizacaoRecursos(2);
-  console.log("Sincronização automática de fim-de-semana concluída.");
-});
-
-/**
- * 5.3 Limpeza Anual Automática (30 de Novembro)
- * Apaga documentos anteriores a 1 de Setembro do ano em curso
- */
-exports.limpezaAnualRecursos = onSchedule("0 0 30 11 *", async (event) => {
-  const anoAtual = new Date().getFullYear();
-  const limite = `${anoAtual}-09-01`;
-
-  const snapshot = await db.collection('recursos_oficiais_cne')
-    .where('dataPublicacao', '<', limite)
-    .get();
-
-  const batch = db.batch();
-  snapshot.docs.forEach(doc => batch.delete(doc.ref));
-  await batch.commit();
-  
-  console.log(`Limpeza anual: ${snapshot.size} recursos antigos removidos.`);
-});

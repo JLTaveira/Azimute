@@ -363,29 +363,6 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
     } catch (error) { alert("Erro na importação."); } finally { setImporting(false); }
   }
 
-  async function handleSyncRecursos() {
-    if (readOnly) return;
-    setSyncing(true); // Ativa o estado de loading no botão
-    try {
-      const fn = httpsCallable(functions, 'syncRecursosCNE');
-      
-      // Se a lista local de recursosCNE estiver vazia, pede 6 páginas.
-      // Se já tivermos dados, pede apenas as últimas 2 (manutenção manual).
-      const numPaginas = recursosCNE.length === 0 ? 6 : 2;
-      
-      const res = await fn({ pages: numPaginas });
-      alert(res.data.message);
-      
-      // Recarrega os dados para mostrar os novos documentos no ecrã
-      fetchDadosSecretaria(); 
-    } catch (error) {
-      console.error("Erro na sincronização:", error);
-      alert("Erro ao ligar ao servidor de recursos oficiais do CNE.");
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   const notificacoesFiltradas = useMemo(() => {
     return filtro === "PENDENTES" ? notificacoes.filter(n => !n.resolvida) : notificacoes.filter(n => n.resolvida);
   }, [notificacoes, filtro]);
@@ -393,8 +370,7 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
   const contagemPendentes = notificacoes.filter(n => !n.resolvida).length;
   
   return (
-    <div className="az-grid" style={{ gap: 24 }}>
-      {/* HEADER (Original) */}
+  <div className="az-grid" style={{ gap: 24 }}>
       <div className="az-card">
         <div className="az-card-inner az-row" style={{ justifyContent: "space-between" }}>
           <div>
@@ -406,7 +382,6 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
         </div>
       </div>
 
-      {/* TABS (Fusão) */}
       <div className="az-tabs">
         <button className={`az-tab ${filtro === "PENDENTES" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PENDENTES")}>📥 Ações Pendentes ({contagemPendentes})</button>
         <button className={`az-tab ${filtro === "RESOLVIDAS" ? "az-tab--active" : ""}`} onClick={() => setFiltro("RESOLVIDAS")}>🗄️ Arquivo / Emitidas</button>
@@ -414,7 +389,6 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
         <button className={`az-tab ${filtro === "PADLET" ? "az-tab--active" : ""}`} onClick={() => setFiltro("PADLET")}>🌐 Canal de Mensagens</button>
       </div>
 
-      {/* ABA: PENDENTES E RESOLVIDAS */}
       {(filtro === "PENDENTES" || filtro === "RESOLVIDAS") && (
         <div className="az-card">
           <div className="az-card-inner" style={{ padding: "0" }}>
@@ -466,86 +440,70 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
         </div>
       )}
 
-      {/* ABA: PADLET */}
       {filtro === "PADLET" && (
         <div className="az-grid" style={{ gap: 24 }}>
-    
-        {/* 1. MURAL DE COMUNICAÇÕES INTERNAS (Abaixo do cabeçalho da tab) */}
-        <MuralOportunidades 
-          profile={profile} 
-          contextoRole="SECRETARIO_AGRUPAMENTO" 
-          onDistribute={(op) => setShareModal(op)} // Permite ao SA re-distribuir mensagens internas
-        />
+          <MuralOportunidades 
+            profile={profile} 
+            contextoRole="SECRETARIO_AGRUPAMENTO" 
+            onDistribute={(op) => setShareModal(op)} 
+          />
 
-        {/* 2. TRIAGEM PEDAGÓGICA (O que já tinhas do Padlet) */}
-        <div className="az-card">
-          <div className="az-card-inner">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <div>
-                <h3 style={{ margin: 0, color: "var(--brand-teal)" }}>Oportunidades Pedagógicas</h3>
-                <p className="az-small muted">(SNA)</p>
-              </div>
-              <div style={{ display: "flex", gap: 12 }}>
-                {!readOnly && (
-                  <button 
-                    className="az-btn az-btn-teal" 
-                    onClick={handleSyncRecursos} 
-                    disabled={syncing}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-                  >
-                    {syncing ? "⏳ A sincronizar..." : "🔄 Sincronizar Recursos Oficiais"}
-                  </button>
-                )}
-              </div>
-              <div style={{ display: "flex", gap: 12 }}>
-                <button className="az-btn" style={{ borderColor: "var(--brand-orange)", color: "var(--brand-orange)" }} onClick={() => setShowArchiveModal(true)}>🗄️ Ver Arquivo ({ocultosAgrupamento.length})</button>
-                {!readOnly && (
-                  <button className="az-btn az-btn-teal" onClick={handleSyncPadlet} disabled={syncing}>
-                    {syncing ? "⏳..." : "🔄 Sincronizar Oportunidades Pedagógicas"}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-          
-          <div className="az-grid-2">
-            {oportunidadesVisiveis.map(op => {
-              const isExposed = expandidoId === op.id;
-              return (
-                <div key={op.id} className="az-panel" style={{ borderLeft: "4px solid var(--brand-orange)", background: "rgba(0,0,0,0.2)" }}>
-                  <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: "var(--text)" }}>{op.titulo}</div>
-                  <div 
-                    className="az-small" 
-                    style={{ marginBottom: 12, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: isExposed ? "unset" : "3", WebkitBoxOrient: "vertical", color: "rgba(255,255,255,0.8)" }}
-                    dangerouslySetInnerHTML={{ __html: op.descricao }} 
-                    />
-                    <button onClick={() => setExpandidoId(isExposed ? null : op.id)} className="az-btn-text" style={{ color: "var(--brand-orange)", fontSize: 11, marginBottom: 12, cursor: "pointer", background: "none", border: "none" }}>
-                      {isExposed ? "↑ Ler menos" : "↓ Ler tudo"}
+          <div className="az-card">
+            <div className="az-card-inner">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                <div>
+                  <h3 style={{ margin: 0, color: "var(--brand-teal)" }}>Oportunidades Pedagógicas</h3>
+                  <p className="az-small muted">(SNA)</p>
+                </div>
+                {/* NOTA: Botão de Sincronização Recursos Oficiais removido (Automação 07:00) */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <button className="az-btn" style={{ borderColor: "var(--brand-orange)", color: "var(--brand-orange)" }} onClick={() => setShowArchiveModal(true)}>🗄️ Arquivo ({ocultosAgrupamento.length})</button>
+                  {!readOnly && (
+                    <button className="az-btn az-btn-teal" onClick={handleSyncPadlet} disabled={syncing}>
+                      {syncing ? "⏳..." : "🔄 CNE - Oportunidades Educativas"}
                     </button>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
-                      <a href={op.link} target="_blank" rel="noreferrer" className="az-small" style={{ color: "#3b82f6", textDecoration: "none" }}>Abrir Link 🔗</a>
-                      {!readOnly && (
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button className="az-btn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => handleOcultarPadlet(op.id)}>📥 Arquivar</button>
-                          <button className="az-btn az-btn-teal" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => setShareModal(op)}>📤 Distribuir</button>
+                  )}
+                </div>
+              </div>
+
+              <div className="az-grid-2">
+                {oportunidadesVisiveis.map(op => {
+                  const isExposed = expandidoId === op.id;
+                  return (
+                    <div key={op.id} className="az-panel" style={{ borderLeft: "4px solid var(--brand-orange)", background: "rgba(0,0,0,0.2)" }}>
+                      <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: "var(--text)" }}>{op.titulo}</div>
+                      <div 
+                        className="az-small" 
+                        style={{ marginBottom: 12, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: isExposed ? "unset" : "3", WebkitBoxOrient: "vertical", color: "rgba(255,255,255,0.8)" }}
+                        dangerouslySetInnerHTML={{ __html: op.descricao }} 
+                        />
+                        <button onClick={() => setExpandidoId(isExposed ? null : op.id)} className="az-btn-text" style={{ color: "var(--brand-orange)", fontSize: 11, marginBottom: 12, cursor: "pointer", background: "none", border: "none" }}>
+                          {isExposed ? "↑ Ler menos" : "↓ Ler tudo"}
+                        </button>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
+                          <a href={op.link} target="_blank" rel="noreferrer" className="az-small" style={{ color: "#3b82f6", textDecoration: "none" }}>Abrir Link 🔗</a>
+                          {!readOnly && (
+                            <div style={{ display: "flex", gap: 8 }}>
+                              <button className="az-btn" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => handleOcultarPadlet(op.id)}>📥 Arquivar</button>
+                              <button className="az-btn az-btn-teal" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => setShareModal(op)}>📤 Distribuir</button>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                      </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* ABA: EFETIVO ( */}
       {filtro === "EFETIVO" && (
         <>
           <div className="az-card" style={{ background: "rgba(23,154,171,.03)" }}>
             <div className="az-card-inner">
-              <h3 className="az-h2" style={{fontSize: 18, marginBottom: 16}}>⚙️ Secretario de Agrupamento</h3>
-               <div className="az-grid-2">
+              <h3 className="az-h2" style={{fontSize: 18, marginBottom: 16}}>⚙️ Gestão de Efetivo</h3>
+                <div className="az-grid-2">
                   <div className="az-panel" style={{ color: "#fff", background: "rgba(0,0,0,0.3)", borderColor: "rgba(255,255,255,0.1)" }}>
                     <h4 style={{marginBottom: 8}}>🔄 Ativar / Desativar / Transferir</h4>
                     <div className="az-row">
@@ -572,8 +530,8 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
                     </select>
                     <button className="az-btn" style={{width: '100%', background: "rgba(255,255,255,0.1)"}} onClick={exportarExcel}>⬇️ Descarregar CSV</button>
                   </div>
-               </div>
-               <div className="az-panel" style={{ marginTop: 16, background: "rgba(0,0,0,0.3)", borderColor: "rgba(255,255,255,0.1)", color: "#fff" }}>
+                </div>
+                <div className="az-panel" style={{ marginTop: 16, background: "rgba(0,0,0,0.3)", borderColor: "rgba(255,255,255,0.1)", color: "#fff" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                     <h4>📥 Importar Utilizadores (Excel)</h4>
                     <button className="az-btn az-btn-teal" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => { window.location.href = "/Template_Azimute.xlsx"; }}>📄 Baixar Template</button>
@@ -600,11 +558,10 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
                       </div>
                     </div>
                   )}
-               </div>
+                </div>
             </div>
           </div>
 
-          {/* EQUIPA DE ANIMAÇÃO */}
           <div className="az-card" style={{ marginBottom: 24, borderColor: "rgba(236,131,50,.3)" }}>
             <div className="az-card-inner">
               <h3 style={{ margin: 0, fontSize: 18, color: "var(--brand-orange)", borderBottom: '1px solid var(--stroke)', paddingBottom: 8, marginBottom: 12 }}>Equipa de Animação (Dirigentes)</h3>
@@ -628,7 +585,6 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
             </div>
           </div>
 
-          {/* SECÇÕES */}
           {Object.keys(secoesMap).sort(sortSecoes).map(secId => {
             const secaoData = secoesMap[secId];
             const elementosSecao = elementos.filter(e => e.secaoDocId === secId && e.ativo !== false);
@@ -673,7 +629,6 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
         </>
       )}
 
-      {/* MODAL DE ARQUIVO (Recuperação Seletiva) */}
       {showArchiveModal && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.9)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "center", padding: 20 }}>
           <div className="az-card" style={{ width: "100%", maxWidth: 600, background: "#111" }}>
@@ -695,7 +650,6 @@ export default function SecretarioAgrupamentoDashboard({ profile, readOnly }) {
         </div>
       )} 
 
-      {/* MODAL DE DISTRIBUIÇÃO (Restrito a Chefias) */}
       {shareModal && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.85)", backdropFilter: "blur(5px)", zIndex: 9999, display: "flex", justifyContent: "center", alignItems: "center" }}>
           <div className="az-card" style={{ width: "100%", maxWidth: 450, background: "var(--bg-dark)" }}>
